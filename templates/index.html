@@ -135,6 +135,19 @@ header {
   font-weight: 500;
 }
 
+.tagline-sep { color: var(--dim); }
+
+@keyframes wordGlow {
+  0%, 100%  { color: var(--muted); text-shadow: none; }
+  11%       { color: #fff; text-shadow: 0 0 14px rgba(0,212,255,0.9), 0 0 30px rgba(0,212,255,0.5); }
+  22%       { color: var(--muted); text-shadow: none; }
+}
+
+.glow-word {
+  animation: wordGlow 9s var(--d, 0s) ease-in-out infinite;
+  display: inline-block;
+}
+
 /* ─── Search ─── */
 .search-wrap {
   position: relative;
@@ -948,7 +961,13 @@ footer {
       <img src="/static/Logo_White.png" alt="Eden" class="logo-img">
       <span class="logo-text">Eden</span>
     </a>
-    <p class="tagline">Search · Grab · Watch</p>
+    <p class="tagline">
+      <span class="glow-word" style="--d:0s">Search</span>
+      <span class="tagline-sep"> · </span>
+      <span class="glow-word" style="--d:3s">Grab</span>
+      <span class="tagline-sep"> · </span>
+      <span class="glow-word" style="--d:6s">Watch</span>
+    </p>
   </header>
 
   <div class="search-wrap">
