@@ -61,6 +61,10 @@ PLEX_SECTIONS = {
     'english':   os.getenv('PLEX_SECTION_ENGLISH', ''),
 }
 
+# Push notifications (Pushover)
+PUSHOVER_TOKEN = os.getenv('PUSHOVER_TOKEN', '')
+PUSHOVER_USER  = os.getenv('PUSHOVER_USER', '')
+
 _db_lock = Lock()
 _scheduler = None
 
@@ -116,6 +120,28 @@ def _nzb_title_matches(query: str, nzb_name: str) -> bool:
         return True
     shorter, longer = (nq, nb) if len(nq) <= len(nb) else (nb, nq)
     return shorter in longer and len(shorter) / len(longer) >= 0.6
+
+
+def _send_push(movie_title: str, language: str, year=None):
+    """Send a Pushover push notification when a movie is queued to NZBGet."""
+    if not PUSHOVER_TOKEN or not PUSHOVER_USER:
+        return
+    short = movie_title.upper().replace(' ', '-')
+    notif_title = f'EDEN-{language.upper()}-{short}'
+    body = f'Queued: {movie_title}{" (" + year + ")" if year else ""} → NZBGet'
+    try:
+        r = requests.post(
+            'https://api.pushover.net/1/messages.json',
+            data={'token': PUSHOVER_TOKEN, 'user': PUSHOVER_USER,
+                  'title': notif_title, 'message': body},
+            timeout=8,
+        )
+        if r.status_code != 200:
+            logger.warning('Pushover returned %d', r.status_code)
+        else:
+            logger.info('Push sent: %s', notif_title)
+    except Exception as e:
+        logger.warning('Push notification failed: %s', e)
 
 
 def _plex_scan(language: str):
@@ -458,6 +484,7 @@ def auto_download_job():
             res = '4K' if ('2160p' in nzb_title or '4K' in nzb_title or 'UHD' in nzb_title) else '1080p'
             logger.info('✓ Queued "%s" [%s/%s] %.2fGB → NZBGet #%d', title, lang, res, size_gb, nzbget_id)
             _record_queued(title, use_year, lang, nzb_title, nzbget_id)
+            _send_push(title, lang, use_year)
             queued += 1
         else:
             logger.error('✗ Failed to queue "%s" to NZBGet', title)
@@ -643,3 +670,4 @@ def trigger_process_files():
 def record_queued_manual(title: str, year, language: str, nzb_title: str, nzbget_id: int):
     """Record a manually queued movie (via the UI Queue button) into the tracking DB."""
     _record_queued(title, year, language, nzb_title, nzbget_id)
+    _send_push(title, language, year)
