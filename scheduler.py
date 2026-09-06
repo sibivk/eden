@@ -75,14 +75,20 @@ def _norm(text: str) -> str:
 def _fuzzy_match(title: str, candidate: str) -> bool:
     """
     Bidirectional fuzzy match: strip year/ext from candidate, then check
-    if either string contains the other. Catches 'Chand Mera Dil' vs
-    'Chand.Mera.Dil.2026.1080p.mkv' and near-duplicate titles.
+    if either string contains the other with ≥60% length overlap.
+    Catches 'Chand Mera Dil' vs 'Chand.Mera.Dil.2026.1080p.mkv' while
+    blocking short-prefix false positives like 'Lurk' vs 'Lurking in the Shadows'.
     """
     norm_title = _norm(title)
     # Strip trailing year and quality tokens from candidate before comparing
     bare = re.sub(r'((?:19|20)\d{2}.*)', '', candidate)
     norm_cand = _norm(bare) or _norm(candidate)
-    return norm_title in norm_cand or norm_cand in norm_title
+    if not norm_title or not norm_cand:
+        return False
+    if norm_title == norm_cand:
+        return True
+    shorter, longer = (norm_title, norm_cand) if len(norm_title) <= len(norm_cand) else (norm_cand, norm_title)
+    return shorter in longer and len(shorter) / len(longer) >= 0.6
 
 
 # Strips year + all quality/codec tokens from an NZB title to extract the bare movie name
