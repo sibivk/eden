@@ -518,6 +518,15 @@ header {
   border-radius: 8px;
 }
 
+.lang-tagline {
+  display: none;
+  font-size: 0.82rem;
+  margin-top: 10px;
+  color: var(--muted);
+  font-style: italic;
+  line-height: 1.5;
+}
+
 /* ─── Toast ─── */
 #toasts {
   position: fixed;
@@ -820,6 +829,7 @@ footer {
         ⚠ You must select a library (Malayalam, Hindi, Tamil or English) before queuing.
       </div>
     </div>
+    <div id="langTagline" class="lang-tagline"></div>
   </div>
 
   <div id="status"></div>
@@ -1226,6 +1236,26 @@ async function triggerNow(btn) {
     btn.textContent = '▶ Run Now';
   }
 }
+/* ─── Language tagline ─── */
+(function () {
+  const taglines = {
+    malayalam: 'നിങ്ങൾ അറിഞ്ഞ സിനിമ എന്ന് ഫ്ലെക്സിൽ (Plex) ലഭ്യമാകുമെന്ന് അറിയാൻ ഇനി കാത്തിരിക്കേണ്ടതില്ല.',
+    tamil:     'நீங்க எதிர்பார்த்த திரைப்படம் எப்போது பிளெக்ஸில் (Plex) கிடைக்கும் என்று பார்க்க இனி நீங்கள் காத்திருக்க வேண்டியதில்லை.',
+    hindi:     'अब आपको यह देखने के लिए और इंतज़ार नहीं करना पड़ेगा कि आपकी जानी-पहचानी फ़िल्म प्लेक्स (Plex) पर कब उपलब्ध होगी।',
+  };
+  const el = document.getElementById('langTagline');
+  document.querySelectorAll('input[name="lang"]').forEach(r => {
+    r.addEventListener('change', () => {
+      const text = taglines[r.value];
+      if (text) {
+        el.textContent = text;
+        el.style.display = 'block';
+      } else {
+        el.style.display = 'none';
+      }
+    });
+  });
+}());
 </script>
 </body>
 </html>
