@@ -1,8 +1,8 @@
-# Moviedarr
+# Eden
 
 > Search · Grab · Watch — automated OTT movie discovery, NZB queuing, and library delivery.
 
-Moviedarr watches [ottmovierelease.com](https://www.ottmovierelease.com) daily, finds new Malayalam / Hindi / Tamil OTT releases, searches nzbs.in for a 1080p grab in the 1–10 GB sweet spot, queues it to NZBGet, and when the download finishes, moves the file into the right language library and triggers a Plex scan — all without touching anything.
+Eden watches [ottmovierelease.com](https://www.ottmovierelease.com) daily, finds new Malayalam / Hindi / Tamil OTT releases, searches nzbs.in for a 1080p grab in the 1–10 GB sweet spot, queues it to NZBGet, and when the download finishes, moves the file into the right language library and triggers a Plex scan — all without touching anything.
 
 ---
 
@@ -24,7 +24,7 @@ Moviedarr watches [ottmovierelease.com](https://www.ottmovierelease.com) daily, 
 - Queues to NZBGet and records the movie with its language in the tracking database
 
 ### File mover (every 5 minutes)
-- Reads `.moviedarr_ready.log` written by your NZBGet post-process script
+- Reads `.eden_ready.log` written by your NZBGet post-process script
 - Looks up each completed file's language from the tracking DB
 - Moves the file to the correct library (`/libraries/malayalam`, `/libraries/hindi`, `/libraries/tamil`)
 - Renames to clean `Title.Year.ext` format
@@ -67,7 +67,7 @@ Opens at **http://\<SERVER_IP\>:5000**
 
 ### 3. (First time) Enable systemd auto-start
 
-The Quadlet file lives at `~/.config/containers/systemd/moviedarr.container`.  
+The Quadlet file lives at `~/.config/containers/systemd/eden.container`.  
 After `./podman_start.sh` runs for the first time, the service is already wired to `default.target` and will start automatically on every reboot.
 
 ---
@@ -102,7 +102,7 @@ After `./podman_start.sh` runs for the first time, the service is already wired 
 Add a line to your post-process script so the file mover knows a download is ready:
 
 ```bash
-echo "$(date +%s)|${NZBPP_DIRECTORY##*/}/${NZBPP_NZBNAME}.mkv" >> /path/to/STORAGE_PATH/.moviedarr_ready.log
+echo "$(date +%s)|${NZBPP_DIRECTORY##*/}/${NZBPP_NZBNAME}.mkv" >> /path/to/STORAGE_PATH/.eden_ready.log
 ```
 
 The file mover reads this log every 5 minutes, matches the entry to its tracked language, and moves the file to the correct library.
@@ -148,7 +148,7 @@ ottmovierelease.com (daily 10:00 UTC)
          ↓
   Queue to NZBGet (category: Evaluate)
          ↓
-  NZBGet downloads → post-process script appends to .moviedarr_ready.log
+  NZBGet downloads → post-process script appends to .eden_ready.log
          ↓
   File mover (every 5 min) reads log → looks up language
          ↓
@@ -177,7 +177,7 @@ ottmovierelease.com (daily 10:00 UTC)
 ## Changelog
 
 ### v1.3.0 — Systemd & Mobile
-- Podman Quadlet (`moviedarr.container`) — starts at boot, no duplicates
+- Podman Quadlet (`eden.container`) — starts at boot, no duplicates
 - Full mobile-responsive layout (640 px and 400 px breakpoints)
 - `podman_start.sh` now builds image then hands off to `systemctl --user restart`
 
