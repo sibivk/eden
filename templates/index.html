@@ -1370,12 +1370,40 @@ async function loadActivity() {
     const icons = { queued: '⬇️', moved: '📁', error: '❌' };
     const langColors = { malayalam: '#34d399', hindi: '#f59e0b', tamil: '#f87171' };
 
+    function renderJobRun(a) {
+      const at = a.at ? new Date(a.at+'Z').toLocaleString() : '';
+      const s = a.status || '';
+      let icon, label, color;
+      if (s === 'scrape_failed') {
+        icon = '⚠️'; color = 'var(--warn)';
+        label = 'OTT site scrape failed — no movies retrieved';
+      } else if (s === 'queued_some') {
+        icon = '✅'; color = 'var(--success)';
+        label = `Queued <strong style="color:var(--success)">${a.queued}</strong> new movie${a.queued!==1?'s':''} · `
+              + `${a.skipped} already in library · ${a.no_nzb} no NZB found`;
+      } else if (s === 'all_skipped') {
+        icon = '☑️'; color = 'var(--primary)';
+        label = `${a.scraped} movies checked — all already in library or tracked (${a.no_nzb} had no NZB)`;
+      } else {
+        icon = '🔍'; color = 'var(--muted)';
+        label = `Scraped ${a.scraped} movies — none could be queued (${a.no_nzb} no NZB found)`;
+      }
+      return `<div class="activity-item" style="background:rgba(255,255,255,0.015);border-radius:10px;padding:10px 12px;margin-bottom:4px;border-left:3px solid ${color}">
+        <span class="activity-icon">${icon}</span>
+        <div class="activity-body">
+          <div class="activity-title" style="color:${color}">Scheduler Run</div>
+          <div class="activity-meta">${label} · ${at}</div>
+        </div>
+      </div>`;
+    }
+
     el.innerHTML = `
       <div style="font-size:0.78rem;color:var(--muted);margin-bottom:14px;font-weight:600">
         Total queued: <strong style="color:var(--text)">${stats.total_queued||0}</strong> &nbsp;·&nbsp;
         Moved to library: <strong style="color:var(--success)">${stats.total_moved||0}</strong>
       </div>
       ${items.map(a => {
+        if (a.type === 'job_run') return renderJobRun(a);
         const icon = icons[a.type] || '📌';
         const lang = a.language || '';
         const lc   = langColors[lang] || 'var(--muted)';

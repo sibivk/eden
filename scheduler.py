@@ -401,11 +401,22 @@ def queue_to_nzbget(nzb_url: str, name: str) -> int | None:
 
 # ── Daily auto-download job ───────────────────────────────────────────────────
 
+def _record_job_run(scraped: int, queued: int, skipped: int, no_nzb: int, status: str):
+    """Write a job_run summary record to the activity log."""
+    with _db_lock:
+        db = _load_db()
+        _log_activity(db, 'job_run',
+                      scraped=scraped, queued=queued,
+                      skipped=skipped, no_nzb=no_nzb, status=status)
+        _save_db(db)
+
+
 def auto_download_job():
     logger.info('=== Auto-download job started ===')
     movies = scrape_ott_movies()
     if not movies:
         logger.warning('Nothing scraped from OTT site — aborting')
+        _record_job_run(scraped=0, queued=0, skipped=0, no_nzb=0, status='scrape_failed')
         return
 
     queued = skipped_exists = skipped_no_nzb = 0
@@ -453,6 +464,9 @@ def auto_download_job():
 
     logger.info('=== Auto-download done: %d queued | %d in library | %d no NZB ===',
                 queued, skipped_exists, skipped_no_nzb)
+    status = 'queued_some' if queued > 0 else ('all_skipped' if skipped_exists > 0 else 'nothing_found')
+    _record_job_run(scraped=len(movies), queued=queued,
+                    skipped=skipped_exists, no_nzb=skipped_no_nzb, status=status)
 
 
 # ── File mover ────────────────────────────────────────────────────────────────
