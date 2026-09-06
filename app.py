@@ -1,10 +1,12 @@
 import os
 import re
+import time
 import logging
 import xml.etree.ElementTree as ET
 from flask import Flask, request, jsonify, render_template
 from urllib.parse import urljoin
 import requests
+from bs4 import BeautifulSoup
 
 os.makedirs("logs", exist_ok=True)
 logging.basicConfig(
@@ -223,6 +225,49 @@ def scheduler_process_files():
         return jsonify({"status": "ok", "message": msg})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+OTT_NEWS_URL = 'https://www.ottmovierelease.com/news/'
+_news_cache: dict = {'data': None, 'at': 0.0}
+NEWS_CACHE_TTL = 900  # 15 minutes
+
+
+@app.route('/api/news', methods=['GET'])
+def get_news():
+    now = time.time()
+    if _news_cache['data'] is not None and now - _news_cache['at'] < NEWS_CACHE_TTL:
+        return jsonify({'news': _news_cache['data']})
+    try:
+        resp = requests.get(
+            OTT_NEWS_URL, timeout=10,
+            headers={'User-Agent': 'Mozilla/5.0 (compatible; Eden)'},
+        )
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        items = []
+        for card in soup.find_all(class_='news-card'):
+            title_el = card.find(class_='news-card__title')
+            link_el  = card.find('a', href=True)
+            if not title_el:
+                continue
+            title = title_el.get_text(strip=True)
+            if not title:
+                continue
+            url = link_el['href'] if link_el else ''
+            # Only allow http/https external links
+            if url and not url.startswith(('http://', 'https://')):
+                url = ''
+            items.append({'title': title, 'url': url})
+        _news_cache['data'] = items
+        _news_cache['at'] = now
+        logger.info('News scraped: %d items', len(items))
+        return jsonify({'news': items})
+    except requests.Timeout:
+        logger.warning('News scrape timed out')
+        return jsonify({'error': 'News fetch timed out'}), 504
+    except Exception as e:
+        logger.error('News scrape failed: %s', e)
+        return jsonify({'error': 'Could not load news'}), 502
 
 
 def clean_movie_title(folder_name):

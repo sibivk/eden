@@ -804,6 +804,77 @@ header {
   box-shadow: 0 0 20px rgba(0,212,255,0.15);
 }
 
+/* ─── Movie News ─── */
+.news-section { animation: fadeUp 0.35s ease both; }
+
+.news-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-decoration: none;
+  margin-bottom: 14px;
+  transition: color 0.2s;
+}
+
+.news-heading:hover { color: var(--primary); }
+
+.news-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.news-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 18px;
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  backdrop-filter: blur(12px);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+  text-decoration: none;
+  color: inherit;
+}
+
+.news-item:hover {
+  border-color: rgba(0,212,255,0.2);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+  transform: translateY(-1px);
+}
+
+.news-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+  margin-top: 6px;
+  box-shadow: 0 0 8px rgba(0,212,255,0.5);
+}
+
+.news-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.45;
+  flex: 1;
+}
+
+.news-arrow {
+  font-size: 0.75rem;
+  color: var(--muted);
+  flex-shrink: 0;
+  margin-top: 3px;
+  opacity: 0.5;
+}
+
+.news-item:hover .news-arrow { opacity: 1; color: var(--primary); }
+
 /* ─── Footer ─── */
 footer {
   text-align: center;
@@ -1143,6 +1214,8 @@ async function doSearch() {
   const status  = document.getElementById('status');
   const query   = input.value.trim();
   if (!query) { input.focus(); return; }
+  // Clear any news panel before showing search results
+  document.getElementById('results').innerHTML = '';
 
   btn.disabled = true;
   status.className = '';
@@ -1244,6 +1317,9 @@ document.getElementById('query').addEventListener('keydown', e => {
   if (e.key === 'Enter') doSearch();
 });
 
+/* ─── Load news on page ready ─── */
+loadNews();
+
 /* ─── Activity panel ─── */
 let _activityLoaded = false;
 
@@ -1317,6 +1393,50 @@ async function triggerNow(btn) {
     btn.disabled = false;
     btn.textContent = '▶ Run Now';
   }
+}
+
+/* ─── Movie News ─── */
+async function loadNews() {
+  const r = document.getElementById('results');
+  const s = document.getElementById('status');
+  s.className = '';
+  s.innerHTML = '';
+  r.innerHTML = '<div style="color:var(--muted);padding:8px 4px;font-size:0.85rem">Loading news…</div>';
+  try {
+    const res  = await fetch('/api/news');
+    const data = await res.json();
+    if (data.error || !data.news) {
+      r.innerHTML = '';
+      return;
+    }
+    renderNews(data.news);
+  } catch (_) {
+    r.innerHTML = '';
+  }
+}
+
+function renderNews(items) {
+  const r = document.getElementById('results');
+  if (!items.length) { r.innerHTML = ''; return; }
+  const rows = items.map(item => {
+    const safeTitle = esc(item.title);
+    if (item.url) {
+      return `<a class="news-item" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
+        <div class="news-dot"></div>
+        <div class="news-title">${safeTitle}</div>
+        <div class="news-arrow">↗</div>
+      </a>`;
+    }
+    return `<div class="news-item">
+      <div class="news-dot"></div>
+      <div class="news-title">${safeTitle}</div>
+    </div>`;
+  }).join('');
+  r.innerHTML = `
+    <div class="news-section">
+      <a class="news-heading" href="/">📰 Movie News</a>
+      <div class="news-grid">${rows}</div>
+    </div>`;
 }
 
 /* ─── Language tagline ─── */
