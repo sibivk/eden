@@ -830,9 +830,9 @@ header {
 
 .news-item {
   display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 14px 18px;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px 10px 10px;
   background: var(--glass);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -840,37 +840,39 @@ header {
   transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
   text-decoration: none;
   color: inherit;
+  overflow: hidden;
 }
 
 .news-item:hover {
   border-color: rgba(0,212,255,0.2);
-  box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.45);
   transform: translateY(-1px);
 }
 
-.news-dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--primary);
+.news-thumb {
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  object-fit: cover;
   flex-shrink: 0;
-  margin-top: 6px;
-  box-shadow: 0 0 8px rgba(0,212,255,0.5);
+  background: var(--dim);
 }
 
 .news-title {
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--text);
   line-height: 1.45;
   flex: 1;
+  min-width: 0;
 }
 
 .news-arrow {
   font-size: 0.75rem;
   color: var(--muted);
   flex-shrink: 0;
-  margin-top: 3px;
-  opacity: 0.5;
+  opacity: 0.45;
+  transition: opacity 0.2s, color 0.2s;
 }
 
 .news-item:hover .news-arrow { opacity: 1; color: var(--primary); }
@@ -1420,17 +1422,15 @@ function renderNews(items) {
   if (!items.length) { r.innerHTML = ''; return; }
   const rows = items.map(item => {
     const safeTitle = esc(item.title);
-    if (item.url) {
-      return `<a class="news-item" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
-        <div class="news-dot"></div>
-        <div class="news-title">${safeTitle}</div>
-        <div class="news-arrow">↗</div>
-      </a>`;
-    }
-    return `<div class="news-item">
-      <div class="news-dot"></div>
+    const safeUrl   = esc(item.url || '');
+    const thumb     = item.image
+      ? `<img class="news-thumb" src="${esc(item.image)}" alt="" loading="lazy" onerror="this.style.display='none'">`
+      : '';
+    return `<a class="news-item" href="${safeUrl}" target="_blank" rel="noopener noreferrer">
+      ${thumb}
       <div class="news-title">${safeTitle}</div>
-    </div>`;
+      <div class="news-arrow">↗</div>
+    </a>`;
   }).join('');
   r.innerHTML = `
     <div class="news-section">

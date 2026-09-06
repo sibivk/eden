@@ -227,9 +227,11 @@ def scheduler_process_files():
         return jsonify({"error": str(e)}), 500
 
 
-OTT_NEWS_URL = 'https://www.ottmovierelease.com/news/'
+PINKVILLA_NEWS_URL = 'https://www.pinkvilla.com/latest'
 _news_cache: dict = {'data': None, 'at': 0.0}
 NEWS_CACHE_TTL = 900  # 15 minutes
+
+_SAFE_URL_RE = re.compile(r'^https?://')
 
 
 @app.route('/api/news', methods=['GET'])
@@ -239,28 +241,43 @@ def get_news():
         return jsonify({'news': _news_cache['data']})
     try:
         resp = requests.get(
-            OTT_NEWS_URL, timeout=10,
-            headers={'User-Agent': 'Mozilla/5.0 (compatible; Eden)'},
+            PINKVILLA_NEWS_URL, timeout=12,
+            headers={
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+                              '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml',
+            },
         )
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, 'html.parser')
         items = []
-        for card in soup.find_all(class_='news-card'):
-            title_el = card.find(class_='news-card__title')
-            link_el  = card.find('a', href=True)
-            if not title_el:
+        for card in soup.find_all('div', class_='mv--cards--sec-s1'):
+            link_el = card.find('a', href=True)
+            if not link_el:
                 continue
-            title = title_el.get_text(strip=True)
+            # Full title is in the <a title="..."> attribute; <p> text is truncated
+            title = link_el.get('title', '').strip()
+            if not title:
+                p = link_el.find('p', class_='card--content--style-s1')
+                title = p.get_text(strip=True) if p else ''
             if not title:
                 continue
-            url = link_el['href'] if link_el else ''
-            # Only allow http/https external links
-            if url and not url.startswith(('http://', 'https://')):
-                url = ''
-            items.append({'title': title, 'url': url})
+            url = link_el['href'].strip()
+            if not _SAFE_URL_RE.match(url):
+                continue
+            # Image: lazy-loaded, real URL is in data-src
+            img_el = card.find('img')
+            image = ''
+            if img_el:
+                image = img_el.get('data-src', '') or img_el.get('src', '')
+                if not _SAFE_URL_RE.match(image):
+                    image = ''
+            items.append({'title': title, 'url': url, 'image': image})
+            if len(items) >= 12:
+                break
         _news_cache['data'] = items
         _news_cache['at'] = now
-        logger.info('News scraped: %d items', len(items))
+        logger.info('PinkVilla news scraped: %d items', len(items))
         return jsonify({'news': items})
     except requests.Timeout:
         logger.warning('News scrape timed out')
