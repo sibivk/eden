@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTAINER_NAME="moviedarr"
+CONTAINER_NAME="eden"
 
 if podman container exists "$CONTAINER_NAME"; then
   echo "Stopping ${CONTAINER_NAME}..."

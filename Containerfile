@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-LABEL project=moviedarr
+LABEL project=eden
 
 WORKDIR /app
 

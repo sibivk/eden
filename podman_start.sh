@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTAINER_NAME="moviedarr"
-IMAGE_NAME="moviedarr:latest"
+CONTAINER_NAME="eden"
+IMAGE_NAME="eden:latest"
 ENV_FILE=".env"
 
 # ── Preflight checks ──────────────────────────────────────
@@ -21,11 +21,11 @@ fi
 echo "Building ${IMAGE_NAME}..."
 podman build -t "$IMAGE_NAME" -f Containerfile .
 
-# ── Cleanup dangling moviedarr images ────────────────────
+# ── Cleanup dangling eden images ─────────────────────────
 echo "Cleaning up dangling images..."
-podman image prune -f --filter label=project=moviedarr 2>/dev/null || true
+podman image prune -f --filter label=project=eden 2>/dev/null || true
 podman images --format "{{.ID}} {{.Repository}}:{{.Tag}}" \
-  | awk '/moviedarr:/ && !/:latest/' \
+  | awk '/eden:/ && !/:latest/' \
   | awk '{print $1}' \
   | xargs -r podman rmi -f 2>/dev/null || true
 

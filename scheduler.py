@@ -1,8 +1,8 @@
 """
-Moviedarr Scheduler
+Eden Scheduler
 
 Daily 10AM  — scrape ottmovierelease.com → search nzbs.in → queue to NZBGet
-Every 5 min — read .moviedarr_ready.log → move completed files to language libraries
+Every 5 min — read .eden_ready.log → move completed files to language libraries
 """
 
 import os
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 STORAGE_MOUNT = Path('/media')
-READY_LOG     = STORAGE_MOUNT / '.moviedarr_ready.log'
+READY_LOG     = STORAGE_MOUNT / '.eden_ready.log'
 DATA_DIR      = Path('/app/data')
 MOVIES_DB     = DATA_DIR / 'movies.json'
 LOG_POSITION  = DATA_DIR / 'log_position.txt'
@@ -265,7 +265,7 @@ def scrape_ott_movies() -> list:
     """
     try:
         resp = requests.get(OTT_URL, timeout=20,
-                            headers={'User-Agent': 'Mozilla/5.0 (compatible; Moviedarr)'})
+                            headers={'User-Agent': 'Mozilla/5.0 (compatible; Eden)'})
         resp.raise_for_status()
     except Exception as e:
         logger.error('OTT scrape failed: %s', e)
@@ -467,7 +467,7 @@ def _save_log_pos(pos: int):
 
 def process_completed_files():
     """
-    Read .moviedarr_ready.log written by the cron script.
+    Read .eden_ready.log written by the NZBGet post-process script.
     For each new entry, look up the movie's language and move the file
     to the appropriate library folder with a clean name (Title.Year.ext).
     """
