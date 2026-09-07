@@ -675,9 +675,10 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .mob-tab-icon { display: block; font-size: 1rem; margin-bottom: 8px; writing-mode: horizontal-tb; }
 
 .mob-overlay {
-  display: none; position: fixed; inset: 0; z-index: 999;
+  display: none; position: fixed; inset: 0; z-index: 1001;
   background: rgba(4,8,18,0.78);
   animation: fadeOverlay 0.22s ease;
+  /* only intercept taps on the dimmed area, not behind the sidebar */
 }
 .mob-overlay.active { display: block; }
 @keyframes fadeOverlay { from { opacity: 0; } to { opacity: 1; } }
@@ -692,17 +693,20 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
     display: flex !important;
     position: fixed; top: 0; right: -110%; height: 100vh;
     width: min(310px, calc(100vw - 44px));
-    z-index: 1002;
+    z-index: 1003;
     border-left: 1px solid rgba(0,212,255,0.18);
     background: rgb(5,9,20);
     backdrop-filter: none;
     transition: right 0.3s cubic-bezier(0.4,0,0.2,1);
     padding: 20px 14px 32px;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     box-shadow: -10px 0 50px rgba(0,0,0,0.8);
+    touch-action: pan-y;
   }
   .sidebar.mob-open { right: 0; }
-  .mob-tab { z-index: 1003; }
+  .mob-tab { z-index: 1004; }
 }
 
 @media (max-width: 520px) {
@@ -1403,13 +1407,17 @@ function toggleMobDrawer() {
   const sidebar = document.querySelector('.sidebar');
   if (sidebar.classList.contains('mob-open')) { closeMobDrawer(); return; }
   sidebar.classList.add('mob-open');
-  document.getElementById('mobOverlay').classList.add('active');
-  document.body.style.overflow = 'hidden';
+  // Shrink overlay to only cover the area to the LEFT of the sidebar panel
+  const overlay = document.getElementById('mobOverlay');
+  const sw = sidebar.getBoundingClientRect().width;
+  overlay.style.right = sw + 'px';
+  overlay.classList.add('active');
 }
 function closeMobDrawer() {
   document.querySelector('.sidebar').classList.remove('mob-open');
-  document.getElementById('mobOverlay').classList.remove('active');
-  document.body.style.overflow = '';
+  const overlay = document.getElementById('mobOverlay');
+  overlay.classList.remove('active');
+  overlay.style.right = '';
 }
 
 /* ─── Enter key → search ─── */
