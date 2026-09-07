@@ -6,7 +6,7 @@
 <title>Eden</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Nunito:wght@800;900&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -82,29 +82,29 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 
 .hero-header {
   position: relative; z-index: 2;
-  display: flex; align-items: center; justify-content: center;
-  padding: 22px 28px;
+  display: flex; align-items: center; justify-content: flex-end;
+  padding: 18px 28px;
 }
 
 .logo {
-  display: inline-flex; align-items: center; gap: 11px;
+  display: inline-flex; align-items: center; gap: 14px;
   text-decoration: none;
 }
 
 .logo-img {
-  height: 40px;
-  filter: drop-shadow(0 0 18px rgba(0,212,255,0.55));
+  height: 56px;
+  filter: drop-shadow(0 0 22px rgba(0,212,255,0.5)) drop-shadow(0 2px 6px rgba(0,0,0,0.6));
 }
 
 .logo-text {
-  font-size: 3.4rem; font-weight: 900; letter-spacing: 4px;
+  font-family: 'Nunito', var(--font);
+  font-size: 3.6rem; font-weight: 900; letter-spacing: 1px;
   text-transform: uppercase;
-  background: linear-gradient(135deg, #fff 20%, var(--primary) 60%, #a78bfa 100%);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  color: #fff;
+  text-shadow: 0 2px 20px rgba(0,212,255,0.35), 0 1px 3px rgba(0,0,0,0.7);
 }
 
 .ott-btn {
-  position: absolute; right: 28px; top: 50%; transform: translateY(-50%);
   padding: 6px 14px;
   background: rgba(255,255,255,0.06);
   border: 1px solid rgba(255,255,255,0.12);
@@ -119,12 +119,13 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
   position: relative; z-index: 2;
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: flex-end;
-  padding: 0 28px 32px; gap: 18px;
+  padding: 0 28px 32px; gap: 10px;
 }
 
 .hero-tagline {
-  font-size: 0.78rem; letter-spacing: 3px;
+  font-size: 0.76rem; letter-spacing: 3px;
   text-transform: uppercase; font-weight: 600; color: var(--muted);
+  margin-bottom: 8px;
 }
 .tsep { color: #1e293b; }
 
@@ -657,10 +658,10 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 }
 
 @media (max-width: 520px) {
-  .hero { height: 340px; }
-  .hero-header { padding: 16px 16px; }
-  .logo-text { font-size: 1.8rem; }
-  .logo-img { height: 34px; }
+  .hero { height: 360px; }
+  .hero-header { padding: 14px 16px; }
+  .logo-text { font-size: 2.4rem; }
+  .logo-img { height: 42px; }
   .hero-center { padding: 0 16px 24px; }
   .lang-tabs-bar { padding: 14px 16px 8px; }
   #catalogSection, #searchSection { padding-left: 0; }
@@ -690,14 +691,14 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
       <div class="hero-vfx"></div>
 
       <div class="hero-header">
-        <a class="logo" href="/">
-          <img src="/static/Logo_White.png" alt="Eden" class="logo-img">
-          <span class="logo-text">Eden</span>
-        </a>
         <a href="https://www.ottmovierelease.com" target="_blank" rel="noopener" class="ott-btn">🎬 OTT</a>
       </div>
 
       <div class="hero-center">
+        <a class="logo" href="/">
+          <img src="/static/Logo_White.png" alt="Eden" class="logo-img">
+          <span class="logo-text">EDEN</span>
+        </a>
         <p class="hero-tagline">
           <span class="glow-word" style="--d:0s">Search</span>
           <span class="tsep"> · </span>
