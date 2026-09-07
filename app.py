@@ -3,8 +3,8 @@ import re
 import time
 import logging
 import xml.etree.ElementTree as ET
-from flask import Flask, request, jsonify, render_template
-from urllib.parse import urljoin
+from flask import Flask, request, jsonify, render_template, Response
+from urllib.parse import urljoin, quote as urlquote
 import requests
 from bs4 import BeautifulSoup
 
@@ -228,7 +228,76 @@ def scheduler_process_files():
 
 
 TMDB_API_KEY = os.getenv('TMDB_API_KEY', '')
+PLEX_URL     = os.getenv('PLEX_URL', '').rstrip('/')
+PLEX_TOKEN   = os.getenv('PLEX_TOKEN', '')
+PLEX_SECTIONS = {
+    'malayalam': os.getenv('PLEX_SECTION_MALAYALAM', ''),
+    'hindi':     os.getenv('PLEX_SECTION_HINDI', ''),
+    'tamil':     os.getenv('PLEX_SECTION_TAMIL', ''),
+    'english':   os.getenv('PLEX_SECTION_ENGLISH', ''),
+}
 _poster_cache: dict = {}
+
+# Only allow well-formed Plex metadata thumb/art paths to prevent SSRF
+_PLEX_PATH_RE = re.compile(r'^/library/metadata/\d+/(?:thumb|art)(?:/\d+)?$')
+
+
+def _plex_poster(title: str, year: str, language: str = '') -> tuple:
+    """Return (poster_proxy_url, backdrop_proxy_url) from Plex, or ('', '')."""
+    if not PLEX_URL or not PLEX_TOKEN:
+        return '', ''
+
+    section_id = PLEX_SECTIONS.get(language.lower(), '')
+
+    def _plex_search(query: str):
+        try:
+            r = requests.get(
+                f'{PLEX_URL}/search',
+                params={'query': query, 'type': 1, 'limit': 8},
+                headers={'X-Plex-Token': PLEX_TOKEN, 'Accept': 'application/json'},
+                timeout=6,
+            )
+            r.raise_for_status()
+            items = r.json().get('MediaContainer', {}).get('Metadata', [])
+            # Filter to the right library section when we know it
+            if section_id:
+                items = [i for i in items
+                         if str(i.get('librarySectionID', '')) == str(section_id)]
+            if not items:
+                return None
+            # Prefer year match, fall back to first result
+            if year:
+                for i in items:
+                    if str(i.get('year', '')) == year:
+                        return i
+            return items[0]
+        except Exception as exc:
+            logger.warning('Plex search "%s": %s', query, exc)
+            return None
+
+    # 1. Try full title
+    match = _plex_search(title)
+
+    # 2. Word-by-word fallback — handles title mismatches between movies.json and Plex
+    if not match:
+        words = sorted([w for w in title.split() if len(w) >= 4], key=len, reverse=True)
+        for word in words[:3]:
+            match = _plex_search(word)
+            if match:
+                break
+
+    if not match:
+        logger.info('Plex: no match for "%s" (lang=%s)', title, language)
+        return '', ''
+
+    thumb = match.get('thumb', '')
+    art   = match.get('art', '')
+
+    def _proxy(path):
+        return f'/api/plex-img?path={urlquote(path)}' if path and _PLEX_PATH_RE.match(path) else ''
+
+    logger.info('Plex art found for "%s" → "%s"', title, match.get('title', ''))
+    return _proxy(thumb), _proxy(art)
 
 PINKVILLA_NEWS_URL = 'https://www.pinkvilla.com/latest'
 _news_cache: dict = {'data': None, 'at': 0.0}
@@ -321,14 +390,16 @@ def api_catalog():
 
 @app.route('/api/poster', methods=['GET'])
 def api_poster():
-    title = request.args.get('title', '').strip()[:200]
-    year  = request.args.get('year',  '').strip()[:4]
-    if not title or not TMDB_API_KEY:
+    title    = request.args.get('title', '').strip()[:200]
+    year     = request.args.get('year',  '').strip()[:4]
+    language = request.args.get('lang',  '').strip().lower()[:20]
+    if not title:
         return jsonify({'poster': '', 'backdrop': ''})
-    cache_key = f'{title.lower()}|{year}'
+    cache_key = f'{title.lower()}|{year}|{language}'
     cached = _poster_cache.get(cache_key)
     if cached and time.time() - cached['at'] < 86400:
         return jsonify({'poster': cached['poster'], 'backdrop': cached.get('backdrop', '')})
+
     def _tmdb_search(query, yr=None):
         p = {'api_key': TMDB_API_KEY, 'query': query, 'language': 'en-US', 'page': 1}
         if yr:
@@ -337,24 +408,49 @@ def api_poster():
         resp.raise_for_status()
         return resp.json().get('results', [])
 
+    poster = backdrop = ''
+
+    # ── 1. Try TMDB ──
+    if TMDB_API_KEY:
+        try:
+            results = _tmdb_search(title, year or None)
+            if not results and year:
+                results = _tmdb_search(title)
+            if results:
+                pp = results[0].get('poster_path', '')
+                bp = results[0].get('backdrop_path', '')
+                if pp: poster   = f'https://image.tmdb.org/t/p/w342{pp}'
+                if bp: backdrop = f'https://image.tmdb.org/t/p/w1280{bp}'
+        except Exception as e:
+            logger.warning('TMDB poster lookup for %s: %s', title, e)
+
+    # ── 2. Fall back to Plex if TMDB had no art ──
+    if not poster:
+        plex_p, plex_b = _plex_poster(title, year, language)
+        if plex_p:
+            poster   = plex_p
+            backdrop = plex_b or backdrop
+
+    _poster_cache[cache_key] = {'poster': poster, 'backdrop': backdrop, 'at': time.time()}
+    return jsonify({'poster': poster, 'backdrop': backdrop})
+
+
+@app.route('/api/plex-img', methods=['GET'])
+def plex_img():
+    path = request.args.get('path', '').strip()
+    if not _PLEX_PATH_RE.match(path) or not PLEX_URL or not PLEX_TOKEN:
+        return Response(status=404)
     try:
-        results = _tmdb_search(title, year or None)
-        # Retry without year constraint if no hits — common for regional titles
-        if not results and year:
-            results = _tmdb_search(title)
-        poster = backdrop = ''
-        if results:
-            pp = results[0].get('poster_path', '')
-            bp = results[0].get('backdrop_path', '')
-            if pp:
-                poster   = f'https://image.tmdb.org/t/p/w342{pp}'
-            if bp:
-                backdrop = f'https://image.tmdb.org/t/p/w1280{bp}'
-        _poster_cache[cache_key] = {'poster': poster, 'backdrop': backdrop, 'at': time.time()}
-        return jsonify({'poster': poster, 'backdrop': backdrop})
+        r = requests.get(
+            f'{PLEX_URL}{path}',
+            headers={'X-Plex-Token': PLEX_TOKEN},
+            timeout=10,
+        )
+        r.raise_for_status()
+        return Response(r.content, content_type=r.headers.get('Content-Type', 'image/jpeg'))
     except Exception as e:
-        logger.warning('TMDB poster lookup for %s: %s', title, e)
-        return jsonify({'poster': '', 'backdrop': ''})
+        logger.warning('Plex image proxy %s: %s', path, e)
+        return Response(status=502)
 
 
 def clean_movie_title(folder_name):
