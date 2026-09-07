@@ -6,7 +6,7 @@
 <title>Eden</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Nunito:wght@800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Nunito:wght@800;900&family=Bebas+Neue&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -92,16 +92,25 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 }
 
 .logo-img {
-  height: 64px;
-  filter: drop-shadow(0 0 28px rgba(0,212,255,0.55)) drop-shadow(0 2px 8px rgba(0,0,0,0.7));
+  height: 88px;
+  filter: drop-shadow(0 0 32px rgba(0,212,255,0.6)) drop-shadow(0 3px 10px rgba(0,0,0,0.8));
 }
 
 .logo-text {
-  font-family: 'Nunito', var(--font);
-  font-size: 3.6rem; font-weight: 900; letter-spacing: 1px;
-  text-transform: uppercase;
-  color: #fff;
-  text-shadow: 0 2px 20px rgba(0,212,255,0.35), 0 1px 3px rgba(0,0,0,0.7);
+  font-family: 'Bebas Neue', 'Nunito', var(--font);
+  font-size: 5rem; font-weight: 400; letter-spacing: 6px;
+  text-transform: uppercase; line-height: 1;
+  /* Metallic gradient matching the cinematic style in the reference image */
+  background: linear-gradient(180deg,
+    #d8eeff 0%,
+    #a8cce8 28%,
+    #6fa8cc 55%,
+    #4a82aa 78%,
+    #2d5f84 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.9)) drop-shadow(0 0 28px rgba(0,180,230,0.25));
 }
 
 .ott-btn {
@@ -712,8 +721,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 @media (max-width: 520px) {
   .hero { height: 360px; }
   .hero-header { padding: 14px 16px; }
-  .logo-text { font-size: 2.4rem; }
-  .logo-img { height: 42px; }
+  .logo-text { font-size: 3.6rem; letter-spacing: 4px; }
+  .logo-img { height: 64px; }
   .hero-center { padding: 0 16px 24px; }
   .lang-tabs-bar { padding: 14px 16px 8px; }
   #catalogSection, #searchSection { padding-left: 0; }
