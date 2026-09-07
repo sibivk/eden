@@ -329,13 +329,19 @@ def api_poster():
     cached = _poster_cache.get(cache_key)
     if cached and time.time() - cached['at'] < 86400:
         return jsonify({'poster': cached['poster'], 'backdrop': cached.get('backdrop', '')})
+    def _tmdb_search(query, yr=None):
+        p = {'api_key': TMDB_API_KEY, 'query': query, 'language': 'en-US', 'page': 1}
+        if yr:
+            p['primary_release_year'] = yr
+        resp = requests.get('https://api.themoviedb.org/3/search/movie', params=p, timeout=8)
+        resp.raise_for_status()
+        return resp.json().get('results', [])
+
     try:
-        params = {'api_key': TMDB_API_KEY, 'query': title, 'language': 'en-US', 'page': 1}
-        if year:
-            params['year'] = year
-        r = requests.get('https://api.themoviedb.org/3/search/movie', params=params, timeout=8)
-        r.raise_for_status()
-        results = r.json().get('results', [])
+        results = _tmdb_search(title, year or None)
+        # Retry without year constraint if no hits — common for regional titles
+        if not results and year:
+            results = _tmdb_search(title)
         poster = backdrop = ''
         if results:
             pp = results[0].get('poster_path', '')
