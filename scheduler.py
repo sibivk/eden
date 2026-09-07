@@ -8,6 +8,7 @@ Every 5 min — read .eden_ready.log → move completed files to language librar
 import os
 import re
 import json
+import time
 import shutil
 import logging
 import xml.etree.ElementTree as ET
@@ -67,6 +68,8 @@ PUSHOVER_USER  = os.getenv('PUSHOVER_USER', '')
 
 _db_lock = Lock()
 _scheduler = None
+_catalog_cache: dict = {'data': None, 'at': 0.0}
+CATALOG_CACHE_TTL = 21600  # 6 hours
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -671,3 +674,15 @@ def record_queued_manual(title: str, year, language: str, nzb_title: str, nzbget
     """Record a manually queued movie (via the UI Queue button) into the tracking DB."""
     _record_queued(title, year, language, nzb_title, nzbget_id)
     _send_push(title, language, year)
+
+
+def get_catalog() -> list:
+    """Return OTT catalog (all languages), refreshing from source every 6 hours."""
+    now = time.time()
+    if _catalog_cache['data'] is not None and now - _catalog_cache['at'] < CATALOG_CACHE_TTL:
+        return _catalog_cache['data']
+    movies = scrape_ott_movies()
+    if movies:
+        _catalog_cache['data'] = movies
+        _catalog_cache['at'] = now
+    return _catalog_cache['data'] or []

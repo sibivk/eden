@@ -227,6 +227,9 @@ def scheduler_process_files():
         return jsonify({"error": str(e)}), 500
 
 
+TMDB_API_KEY = os.getenv('TMDB_API_KEY', '')
+_poster_cache: dict = {}
+
 PINKVILLA_NEWS_URL = 'https://www.pinkvilla.com/latest'
 _news_cache: dict = {'data': None, 'at': 0.0}
 NEWS_CACHE_TTL = 900  # 15 minutes
@@ -285,6 +288,57 @@ def get_news():
     except Exception as e:
         logger.error('News scrape failed: %s', e)
         return jsonify({'error': 'Could not load news'}), 502
+
+
+@app.route('/api/catalog', methods=['GET'])
+def api_catalog():
+    try:
+        from scheduler import get_catalog
+        movies = get_catalog()
+        grouped: dict = {}
+        for m in movies:
+            lang = m['language']
+            grouped.setdefault(lang, []).append({
+                'title': m['title'],
+                'year': m.get('year'),
+                'language': lang,
+            })
+        return jsonify({'catalog': grouped})
+    except Exception as e:
+        logger.error('Catalog error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/poster', methods=['GET'])
+def api_poster():
+    title = request.args.get('title', '').strip()[:200]
+    year  = request.args.get('year',  '').strip()[:4]
+    if not title or not TMDB_API_KEY:
+        return jsonify({'poster': '', 'backdrop': ''})
+    cache_key = f'{title.lower()}|{year}'
+    cached = _poster_cache.get(cache_key)
+    if cached and time.time() - cached['at'] < 86400:
+        return jsonify({'poster': cached['poster'], 'backdrop': cached.get('backdrop', '')})
+    try:
+        params = {'api_key': TMDB_API_KEY, 'query': title, 'language': 'en-US', 'page': 1}
+        if year:
+            params['year'] = year
+        r = requests.get('https://api.themoviedb.org/3/search/movie', params=params, timeout=8)
+        r.raise_for_status()
+        results = r.json().get('results', [])
+        poster = backdrop = ''
+        if results:
+            pp = results[0].get('poster_path', '')
+            bp = results[0].get('backdrop_path', '')
+            if pp:
+                poster   = f'https://image.tmdb.org/t/p/w342{pp}'
+            if bp:
+                backdrop = f'https://image.tmdb.org/t/p/w1280{bp}'
+        _poster_cache[cache_key] = {'poster': poster, 'backdrop': backdrop, 'at': time.time()}
+        return jsonify({'poster': poster, 'backdrop': backdrop})
+    except Exception as e:
+        logger.warning('TMDB poster lookup for %s: %s', title, e)
+        return jsonify({'poster': '', 'backdrop': ''})
 
 
 def clean_movie_title(folder_name):
