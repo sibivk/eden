@@ -82,7 +82,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 
 .hero-header {
   position: relative; z-index: 2;
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: center;
   padding: 22px 28px;
 }
 
@@ -97,12 +97,14 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 }
 
 .logo-text {
-  font-size: 2.2rem; font-weight: 800; letter-spacing: -1.5px;
+  font-size: 3.4rem; font-weight: 900; letter-spacing: 4px;
+  text-transform: uppercase;
   background: linear-gradient(135deg, #fff 20%, var(--primary) 60%, #a78bfa 100%);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
 
 .ott-btn {
+  position: absolute; right: 28px; top: 50%; transform: translateY(-50%);
   padding: 6px 14px;
   background: rgba(255,255,255,0.06);
   border: 1px solid rgba(255,255,255,0.12);
@@ -834,10 +836,10 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 
 /* ─── Row metadata ─── */
 const ROW_META = {
-  malayalam: { title: 'Trending: Mollywood',           color: '#22c55e' },
-  hindi:     { title: 'Just Added: Bollywood',          color: '#f97316' },
-  tamil:     { title: 'Critically Acclaimed (Tamil)',   color: '#00d4ff' },
-  english:   { title: 'Hollywood Picks',                color: '#a855f7' },
+  malayalam: { title: 'Recently Added: Mollywood',  color: '#22c55e' },
+  hindi:     { title: 'Recently Added: Bollywood',  color: '#f97316' },
+  tamil:     { title: 'Recently Added: Kollywood',  color: '#00d4ff' },
+  english:   { title: 'Recently Added: Hollywood',  color: '#a855f7' },
 };
 
 /* ─── Filter language tabs ─── */
@@ -849,7 +851,7 @@ function filterLang(lang, btn) {
   });
 }
 
-/* ─── Catalog loading ─── */
+/* ─── Library loading (movies sent to Plex) ─── */
 let _catalogLoaded = false;
 
 function showSkeletonPosters(trackEl, count = 8) {
@@ -864,24 +866,26 @@ function showSkeletonPosters(trackEl, count = 8) {
 async function loadCatalog() {
   if (_catalogLoaded) return;
   const skTrack = document.getElementById('skeletonTrack');
-  if (skTrack) showSkeletonPosters(skTrack, 10);
+  if (skTrack) showSkeletonPosters(skTrack, 6);
 
   try {
-    const res  = await fetch('/api/catalog');
+    const res  = await fetch('/api/library');
     const data = await res.json();
-    if (data.error || !data.catalog) return;
+    if (data.error) throw new Error(data.error);
 
     const container = document.getElementById('catalogRows');
     container.innerHTML = '';
 
     const langOrder = ['malayalam', 'hindi', 'tamil', 'english'];
     let heroSet = false;
+    let anyRow  = false;
 
     for (const lang of langOrder) {
-      const movies = data.catalog[lang] || [];
+      const movies = (data.library || {})[lang] || [];
       if (!movies.length) continue;
+      anyRow = true;
 
-      const meta = ROW_META[lang] || { title: lang, color: '#64748b' };
+      const meta  = ROW_META[lang] || { title: lang, color: '#64748b' };
       const rowId = `track-${lang}`;
 
       const row = document.createElement('div');
@@ -903,22 +907,28 @@ async function loadCatalog() {
         </div>`;
       container.appendChild(row);
 
-      /* Lazy-load TMDB posters via IntersectionObserver */
       row.querySelectorAll('.poster-card[data-title]').forEach(card => {
         posterObserver.observe(card);
       });
 
-      /* Set hero backdrop from first movie found */
       if (!heroSet && movies[0]) {
         heroSet = true;
         loadHeroBackdrop(movies[0].title, movies[0].year || '');
       }
     }
 
+    if (!anyRow) {
+      container.innerHTML = `
+        <div class="catalog-empty">
+          No movies in your Plex library yet.<br>
+          <span style="font-size:0.8rem;opacity:0.6">Movies appear here once they're downloaded and moved.</span>
+        </div>`;
+    }
+
     _catalogLoaded = true;
   } catch (e) {
     document.getElementById('catalogRows').innerHTML =
-      '<div class="catalog-empty">Could not load catalog — the OTT site may be unreachable.</div>';
+      '<div class="catalog-empty">Could not load library.</div>';
   }
 }
 

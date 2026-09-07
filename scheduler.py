@@ -676,6 +676,28 @@ def record_queued_manual(title: str, year, language: str, nzb_title: str, nzbget
     _send_push(title, language, year)
 
 
+def get_library() -> dict:
+    """Return movies already moved to Plex libraries, grouped by language, newest first."""
+    with _db_lock:
+        db = _load_db()
+    grouped: dict = {}
+    for entry in db.get('downloads', {}).values():
+        if entry.get('status') != 'moved':
+            continue
+        lang = entry.get('language', '')
+        if not lang:
+            continue
+        grouped.setdefault(lang, []).append({
+            'title':    entry.get('title', ''),
+            'year':     entry.get('year'),
+            'language': lang,
+            'moved_at': entry.get('moved_at', ''),
+        })
+    for lang in grouped:
+        grouped[lang].sort(key=lambda x: x.get('moved_at', ''), reverse=True)
+    return grouped
+
+
 def get_catalog() -> list:
     """Return OTT catalog (all languages), refreshing from source every 6 hours."""
     now = time.time()

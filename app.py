@@ -290,6 +290,16 @@ def get_news():
         return jsonify({'error': 'Could not load news'}), 502
 
 
+@app.route('/api/library', methods=['GET'])
+def api_library():
+    try:
+        from scheduler import get_library
+        return jsonify({'library': get_library()})
+    except Exception as e:
+        logger.error('Library error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/catalog', methods=['GET'])
 def api_catalog():
     try:
