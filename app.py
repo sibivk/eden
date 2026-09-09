@@ -36,19 +36,55 @@ NZBGET_PASS = os.getenv("NZBGET_PASSWORD", "")
 NZB_CATEGORY = os.getenv("NZB_CATEGORY", "Evaluate")
 MAX_SIZE_BYTES = int(os.getenv("MAX_SIZE_GB", "10")) * 1024 ** 3
 
+# External API access
+EDEN_API_KEY    = os.getenv("EDEN_API_KEY", "")       # set to lock the API with a key
+EDEN_CORS_ORIGINS = os.getenv("EDEN_CORS_ORIGINS", "*")  # e.g. "https://myapp.example.com"
+
 NEWZNAB_NS = "{http://www.newznab.com/DTD/2010/feeds/attributes/}"
 
 _SAFE_TITLE_RE = re.compile(r"[^\w\s\-\(\)\.]")
 _YEAR_RE = re.compile(r"^(.*?)[. _]\(?(\d{4})\)?")
 
 
+@app.before_request
+def check_api_key():
+    """Require X-Eden-API-Key header (or ?api_key=) on /api/* when EDEN_API_KEY is set."""
+    if not request.path.startswith("/api/"):
+        return
+    if request.method == "OPTIONS":
+        return  # let preflight through
+    if request.path == "/api/health":
+        return  # health is always public
+    if not EDEN_API_KEY:
+        return  # no key configured → open API (default for local use)
+    provided = (request.headers.get("X-Eden-API-Key") or
+                request.args.get("api_key", ""))
+    if provided != EDEN_API_KEY:
+        return jsonify({"error": "Unauthorized — missing or invalid X-Eden-API-Key"}), 401
+
+
 @app.after_request
-def security_headers(response):
+def apply_headers(response):
+    # Security headers
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Only set X-Frame-Options on non-API responses (APIs don't render in frames)
+    if not request.path.startswith("/api/"):
+        response.headers["X-Frame-Options"] = "DENY"
+    # CORS — allow external webapps to call Eden's API
+    if request.path.startswith("/api/"):
+        response.headers["Access-Control-Allow-Origin"]  = EDEN_CORS_ORIGINS
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Eden-API-Key"
+        response.headers["Access-Control-Max-Age"]       = "86400"
     return response
+
+
+@app.route("/api/<path:subpath>", methods=["OPTIONS"])
+def api_preflight(subpath):
+    """Handle CORS preflight for all /api/* routes."""
+    return Response(status=204)
 
 
 @app.route("/")
