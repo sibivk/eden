@@ -448,6 +448,15 @@ CAL_CACHE_TTL = 3 * 3600  # 3 hours
 
 
 def _scrape_calendar(year: int) -> list:
+    """
+    Scrape bollywoodmdb.com calendar.
+    Structure: <section aria-labelledby="date-YYYY-MM-DD">
+      <ol><li>
+        <p class="bmdb-body-emphasis …">Movie Title</p>
+        <img src="https://cdn.bollywoodmdb.com/…">
+      </li></ol>
+    </section>
+    """
     resp = requests.get(
         BOLLYWOOD_CAL_URL.format(year=year), timeout=15,
         headers={
@@ -459,70 +468,50 @@ def _scrape_calendar(year: int) -> list:
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, 'html.parser')
 
-    # Remove noise
-    for tag in soup.find_all(['script', 'style', 'nav', 'footer', 'head', 'noscript']):
-        tag.decompose()
-
     movies = []
     seen: set = set()
-    current_month = 0
 
-    for el in soup.find_all(True):
-        tag = el.name.lower() if el.name else ''
-        if not tag:
+    # Each date block: <section aria-labelledby="date-2026-09-03">
+    for section in soup.find_all('section', attrs={'aria-labelledby': True}):
+        lid = section.get('aria-labelledby', '')
+        parts = lid.split('-')          # ['date', '2026', '09', '03']
+        if len(parts) != 4 or parts[0] != 'date':
+            continue
+        try:
+            yr, mo, dy = int(parts[1]), int(parts[2]), int(parts[3])
+        except ValueError:
+            continue
+        if yr != year:
             continue
 
-        # Track current month from section headings
-        if tag in ('h1', 'h2', 'h3', 'h4', 'th', 'span', 'p'):
-            txt = el.get_text(strip=True).lower()
-            for mname, mnum in _MONTH_FULL_MAP.items():
-                if txt == mname or txt.startswith(mname):
-                    current_month = mnum
-                    break
-
-        if tag not in ('div', 'article', 'li', 'tr', 'td'):
+        ol = section.find('ol')
+        if not ol:
             continue
 
-        # Require an image (poster art)
-        img = el.find('img')
-        if not img:
-            continue
+        for li in ol.find_all('li'):
+            # Title: <p class="bmdb-body-emphasis …"> — not the genre/cast line
+            title_el = li.find('p', class_=lambda c: c and 'bmdb-body-emphasis' in c)
+            if not title_el:
+                continue
+            title = title_el.get_text(strip=True)
+            if not title:
+                continue
 
-        # Find the movie title
-        title_el = (el.find(['h2', 'h3', 'h4', 'h5', 'strong']) or
-                    next((a for a in el.find_all('a', href=True)
-                          if len(a.get_text(strip=True)) > 2), None))
-        if not title_el:
-            continue
+            key = (title.lower(), mo)
+            if key in seen:
+                continue
+            seen.add(key)
 
-        title = (title_el.get('title') or title_el.get_text(' ', strip=True)).strip()
-        if not title or len(title) < 2 or title.lower() in _MONTH_FULL_MAP:
-            continue
-
-        # Extract date from element text
-        full_text = el.get_text(' ', strip=True)
-        day = None
-        dm = _CAL_DATE_RE.search(full_text)
-        if dm:
-            day = int(dm.group(1))
-            abbr = dm.group(2)[:3].lower()
-            current_month = _MONTH_ABBR_MAP.get(abbr, current_month)
-
-        if not current_month:
-            continue
-
-        key = (title.lower(), current_month)
-        if key in seen:
-            continue
-        seen.add(key)
-
-        poster = (img.get('data-src') or img.get('data-original') or img.get('src') or '').strip()
-        if poster and not poster.startswith('http'):
+            img = li.find('img')
             poster = ''
+            if img:
+                poster = (img.get('src') or img.get('data-src') or '').strip()
+                if not poster.startswith('http'):
+                    poster = ''
 
-        movies.append({'title': title, 'month': current_month, 'day': day, 'poster': poster})
+            movies.append({'title': title, 'month': mo, 'day': dy, 'poster': poster})
 
-    movies.sort(key=lambda x: (x['month'], x['day'] or 0))
+    movies.sort(key=lambda x: (x['month'], x['day']))
     logger.info('Calendar: scraped %d movies for %d', len(movies), year)
     return movies
 
