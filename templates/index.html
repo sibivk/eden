@@ -735,6 +735,51 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
   .btn-queue { width: 100%; text-align: center; padding: 12px; }
   .size-bar-wrap { display: none; }
 }
+
+/* ─── Release Calendar ─── */
+.cal-list {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 6px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: #1e293b transparent;
+}
+
+.cal-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.cal-item:last-child { border-bottom: none; }
+
+.cal-poster {
+  width: 36px; height: 52px; border-radius: 5px;
+  object-fit: cover; flex-shrink: 0;
+  background: rgba(255,255,255,0.05);
+}
+
+.cal-poster-ph {
+  width: 36px; height: 52px; border-radius: 5px; flex-shrink: 0;
+  background: rgba(139,92,246,0.18);
+  border: 1px solid rgba(139,92,246,0.28);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.0rem; font-weight: 700; color: #a78bfa;
+}
+
+.cal-info { flex: 1; min-width: 0; }
+
+.cal-date {
+  font-size: 0.62rem; font-weight: 700;
+  color: var(--primary); letter-spacing: 0.3px;
+  margin-bottom: 3px; text-transform: uppercase;
+}
+
+.cal-title {
+  font-size: 0.75rem; font-weight: 600; color: var(--text);
+  line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden;
+}
 </style>
 </head>
 <body>
@@ -836,6 +881,19 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
         <div class="stat-ring-wrap">
           <div class="stat-ring-val" id="statMoved">—</div>
           <div class="stat-ring-label">Moved</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Release Calendar -->
+    <div class="sw-panel">
+      <button class="activity-toggle-btn" onclick="toggleCalendar(this)">
+        <span id="calHeader">🗓 Release Calendar</span>
+        <span class="chevron" id="calChevron">▾</span>
+      </button>
+      <div id="calendarPanel" style="display:none">
+        <div id="calendarContent" class="cal-list">
+          <div class="sw-loading">Loading…</div>
         </div>
       </div>
     </div>
@@ -1428,6 +1486,69 @@ function closeMobDrawer() {
   const overlay = document.getElementById('mobOverlay');
   overlay.classList.remove('active');
   overlay.style.right = '';
+}
+
+/* ─── Release Calendar ─── */
+const _MONTH_ABBRS = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let _calLoaded = false;
+let _calMonth  = 0;
+
+async function loadCalendar() {
+  const el = document.getElementById('calendarContent');
+  try {
+    const res  = await fetch('/api/calendar');
+    const data = await res.json();
+    const now  = new Date();
+
+    // Update header with "🗓 September 2026"
+    if (data.label) {
+      document.getElementById('calHeader').textContent = '🗓 ' + data.label;
+    }
+    _calMonth = data.month || now.getMonth() + 1;
+
+    const movies = data.movies || [];
+    if (!movies.length) {
+      el.innerHTML = '<div class="sw-loading">No releases this month.</div>';
+      _calLoaded = true;
+      return;
+    }
+
+    el.innerHTML = movies.map(m => {
+      const t = esc(m.title);
+      const dateStr = m.day
+        ? `${_MONTH_ABBRS[m.month] || ''} ${m.day}`
+        : '';
+      const art = m.poster
+        ? `<img class="cal-poster" src="${esc(m.poster)}" alt="" loading="lazy" onerror="this.parentNode.innerHTML='<div class=\\'cal-poster-ph\\'>${esc(m.title.charAt(0).toUpperCase())}</div>'">`
+        : `<div class="cal-poster-ph">${esc(m.title.charAt(0).toUpperCase())}</div>`;
+      return `<div class="cal-item">
+        ${art}
+        <div class="cal-info">
+          ${dateStr ? `<div class="cal-date">${dateStr}</div>` : ''}
+          <div class="cal-title">${t}</div>
+        </div>
+      </div>`;
+    }).join('');
+    _calLoaded = true;
+  } catch (_) {
+    el.innerHTML = '<div class="sw-loading">Could not load calendar.</div>';
+  }
+}
+
+function toggleCalendar(btn) {
+  const panel   = document.getElementById('calendarPanel');
+  const chevron = document.getElementById('calChevron');
+  const open    = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  chevron.classList.toggle('open', !open);
+  if (!open) {
+    // Re-load if not loaded or month has changed
+    const curMonth = new Date().getMonth() + 1;
+    if (!_calLoaded || _calMonth !== curMonth) {
+      _calLoaded = false;
+      loadCalendar();
+    }
+  }
 }
 
 /* ─── Enter key → search ─── */

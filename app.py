@@ -3,6 +3,7 @@ import re
 import time
 import logging
 import xml.etree.ElementTree as ET
+from datetime import datetime as _dt
 from flask import Flask, request, jsonify, render_template, Response
 from urllib.parse import urljoin, quote as urlquote
 import requests
@@ -425,6 +426,128 @@ def get_news():
     except Exception as e:
         logger.error('News scrape failed: %s', e)
         return jsonify({'error': 'Could not load news'}), 502
+
+
+BOLLYWOOD_CAL_URL = 'https://www.bollywoodmdb.com/movies/calendar-{year}'
+_MONTH_ABBR_MAP = {
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+    'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+}
+_MONTH_FULL_MAP = {
+    'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
+    'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12,
+}
+_CAL_DATE_RE = re.compile(
+    r'\b(\d{1,2})\s*(?:st|nd|rd|th)?\s+'
+    r'(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
+    r'jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)',
+    re.IGNORECASE,
+)
+_cal_cache: dict = {'data': None, 'at': 0.0, 'year': 0}
+CAL_CACHE_TTL = 3 * 3600  # 3 hours
+
+
+def _scrape_calendar(year: int) -> list:
+    resp = requests.get(
+        BOLLYWOOD_CAL_URL.format(year=year), timeout=15,
+        headers={
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+                          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml',
+        },
+    )
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, 'html.parser')
+
+    # Remove noise
+    for tag in soup.find_all(['script', 'style', 'nav', 'footer', 'head', 'noscript']):
+        tag.decompose()
+
+    movies = []
+    seen: set = set()
+    current_month = 0
+
+    for el in soup.find_all(True):
+        tag = el.name.lower() if el.name else ''
+        if not tag:
+            continue
+
+        # Track current month from section headings
+        if tag in ('h1', 'h2', 'h3', 'h4', 'th', 'span', 'p'):
+            txt = el.get_text(strip=True).lower()
+            for mname, mnum in _MONTH_FULL_MAP.items():
+                if txt == mname or txt.startswith(mname):
+                    current_month = mnum
+                    break
+
+        if tag not in ('div', 'article', 'li', 'tr', 'td'):
+            continue
+
+        # Require an image (poster art)
+        img = el.find('img')
+        if not img:
+            continue
+
+        # Find the movie title
+        title_el = (el.find(['h2', 'h3', 'h4', 'h5', 'strong']) or
+                    next((a for a in el.find_all('a', href=True)
+                          if len(a.get_text(strip=True)) > 2), None))
+        if not title_el:
+            continue
+
+        title = (title_el.get('title') or title_el.get_text(' ', strip=True)).strip()
+        if not title or len(title) < 2 or title.lower() in _MONTH_FULL_MAP:
+            continue
+
+        # Extract date from element text
+        full_text = el.get_text(' ', strip=True)
+        day = None
+        dm = _CAL_DATE_RE.search(full_text)
+        if dm:
+            day = int(dm.group(1))
+            abbr = dm.group(2)[:3].lower()
+            current_month = _MONTH_ABBR_MAP.get(abbr, current_month)
+
+        if not current_month:
+            continue
+
+        key = (title.lower(), current_month)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        poster = (img.get('data-src') or img.get('data-original') or img.get('src') or '').strip()
+        if poster and not poster.startswith('http'):
+            poster = ''
+
+        movies.append({'title': title, 'month': current_month, 'day': day, 'poster': poster})
+
+    movies.sort(key=lambda x: (x['month'], x['day'] or 0))
+    logger.info('Calendar: scraped %d movies for %d', len(movies), year)
+    return movies
+
+
+@app.route('/api/calendar', methods=['GET'])
+def api_calendar():
+    now = _dt.now()
+    year, month = now.year, now.month
+    label = now.strftime('%B %Y')
+
+    if (_cal_cache['data'] is not None and _cal_cache['year'] == year and
+            time.time() - _cal_cache['at'] < CAL_CACHE_TTL):
+        movies = [m for m in _cal_cache['data'] if m['month'] == month]
+        return jsonify({'movies': movies, 'month': month, 'year': year, 'label': label})
+
+    try:
+        all_movies = _scrape_calendar(year)
+        _cal_cache.update({'data': all_movies, 'at': time.time(), 'year': year})
+        movies = [m for m in all_movies if m['month'] == month]
+        return jsonify({'movies': movies, 'month': month, 'year': year, 'label': label})
+    except Exception as e:
+        logger.error('Calendar scrape: %s', e)
+        return jsonify({
+            'error': str(e), 'movies': [], 'month': month, 'year': year, 'label': label,
+        }), 502
 
 
 @app.route('/api/library', methods=['GET'])
