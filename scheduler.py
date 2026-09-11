@@ -105,6 +105,25 @@ _QUALITY_STRIP_RE = re.compile(
     r'dts|ac3|ddp?\d*|flac|aac|atmos|remux|proper|repack).*'
 )
 
+_HEVC_RE = re.compile(r'(?i)\b(HEVC|x265|h\.?265)\b')
+_5_1_RE  = re.compile(r'(?i)\b(DD[P]?[.\s]?5\.1|DTS(?:[-.\s](?:HD|MA|HD[-.]MA))?|AC3|5\.1|Atmos|TrueHD)\b')
+_1080_RE = re.compile(r'(?i)\b1080[pi]\b')
+_4K_RE   = re.compile(r'(?i)\b(2160p|4K|UHD)\b')
+_720_RE  = re.compile(r'(?i)\b720p\b')
+
+
+def _parse_quality(title: str) -> dict:
+    """Extract resolution, HEVC, and 5.1 audio flags from an NZB title string."""
+    is_4k   = bool(_4K_RE.search(title))
+    is_1080 = bool(_1080_RE.search(title))
+    is_720  = bool(_720_RE.search(title))
+    resolution = '4K' if is_4k else ('1080p' if is_1080 else ('720p' if is_720 else 'SD'))
+    return {
+        'resolution': resolution,
+        'is_hevc': bool(_HEVC_RE.search(title)),
+        'has_5_1': bool(_5_1_RE.search(title)),
+    }
+
 
 def _nzb_title_matches(query: str, nzb_name: str) -> bool:
     """
@@ -345,8 +364,11 @@ def scrape_ott_movies() -> list:
 
 def search_1080p(title: str) -> list:
     """
-    Search nzbs.in for 1080p releases of a title (falls back to 2160p/4K if none found).
-    Results are title-verified, filtered to 1GB–10GB, sorted smallest-first.
+    Search nzbs.in for the best available release:
+    1. 1080p (preferred)
+    2. HEVC + 5.1 audio (acceptable fallback when no 1080p exists)
+    3. 4K/UHD (last resort if within size limit)
+    All results are title-verified and filtered to 1 GB–10 GB, sorted smallest-first.
     """
     if not NZBS_API_KEY:
         logger.warning('NZBS_API_KEY not set — skipping search')
@@ -361,17 +383,13 @@ def search_1080p(title: str) -> list:
         logger.error('nzbs.in search error for "%s": %s', title, e)
         return []
 
-    results_1080 = []
-    results_4k   = []
+    results_1080    = []
+    results_hevc_51 = []
+    results_4k      = []
 
     for item in root.findall('.//item'):
         nzb_title = item.findtext('title') or ''
         link      = item.findtext('link') or ''
-
-        is_1080 = '1080p' in nzb_title or '1080i' in nzb_title
-        is_4k   = '2160p' in nzb_title or '4K' in nzb_title or 'UHD' in nzb_title
-        if not is_1080 and not is_4k:
-            continue
 
         # Verify the NZB title actually corresponds to the searched movie
         if not _nzb_title_matches(title, nzb_title):
@@ -394,14 +412,25 @@ def search_1080p(title: str) -> list:
         if size < MIN_SIZE_BYTES or size > MAX_SIZE_BYTES:
             continue
 
-        entry = {'title': nzb_title, 'url': link, 'size_bytes': size}
-        if is_1080:
-            results_1080.append(entry)
-        else:
-            results_4k.append(entry)
+        q = _parse_quality(nzb_title)
+        entry = {'title': nzb_title, 'url': link, 'size_bytes': size, 'quality': q}
 
-    # Prefer 1080p; fall back to 4K/2160p if nothing found
-    results = results_1080 or results_4k
+        if q['resolution'] == '1080p':
+            results_1080.append(entry)
+        elif q['resolution'] == '4K':
+            results_4k.append(entry)
+        elif q['is_hevc'] and q['has_5_1']:
+            results_hevc_51.append(entry)
+        # else: skip — not an acceptable quality (no 1080p, no HEVC+5.1, not 4K)
+
+    if results_1080:
+        results = results_1080
+    elif results_hevc_51:
+        logger.info('No 1080p for "%s" — using HEVC+5.1 fallback (%d result(s))', title, len(results_hevc_51))
+        results = results_hevc_51
+    else:
+        results = results_4k
+
     results.sort(key=lambda x: x['size_bytes'])
     return results
 

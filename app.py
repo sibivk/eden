@@ -45,6 +45,24 @@ NEWZNAB_NS = "{http://www.newznab.com/DTD/2010/feeds/attributes/}"
 _SAFE_TITLE_RE = re.compile(r"[^\w\s\-\(\)\.]")
 _YEAR_RE = re.compile(r"^(.*?)[. _]\(?(\d{4})\)?")
 
+_HEVC_RE = re.compile(r'(?i)\b(HEVC|x265|h\.?265)\b')
+_5_1_RE  = re.compile(r'(?i)\b(DD[P]?[.\s]?5\.1|DTS(?:[-.\s](?:HD|MA|HD[-.]MA))?|AC3|5\.1|Atmos|TrueHD)\b')
+_1080_RE = re.compile(r'(?i)\b1080[pi]\b')
+_4K_RE   = re.compile(r'(?i)\b(2160p|4K|UHD)\b')
+_720_RE  = re.compile(r'(?i)\b720p\b')
+
+
+def _parse_quality(title: str) -> dict:
+    is_4k   = bool(_4K_RE.search(title))
+    is_1080 = bool(_1080_RE.search(title))
+    is_720  = bool(_720_RE.search(title))
+    resolution = '4K' if is_4k else ('1080p' if is_1080 else ('720p' if is_720 else 'SD'))
+    return {
+        'resolution': resolution,
+        'is_hevc': bool(_HEVC_RE.search(title)),
+        'has_5_1': bool(_5_1_RE.search(title)),
+    }
+
 
 @app.before_request
 def check_api_key():
@@ -147,6 +165,7 @@ def search_nzb():
             if size > MAX_SIZE_BYTES:
                 continue
 
+            q = _parse_quality(title)
             results.append({
                 "title": title,
                 "download_url": link,
@@ -154,9 +173,22 @@ def search_nzb():
                 "grabs": grabs,
                 "imdb_rating": imdb_rating,
                 "imdb_votes": imdb_votes,
+                "quality": q,
             })
 
-        results.sort(key=lambda x: (x["imdb_rating"] or 0, x["imdb_votes"]), reverse=True)
+        def _sort_key(r):
+            res = r["quality"]["resolution"]
+            if res == "1080p":
+                prio = 0
+            elif res == "4K":
+                prio = 1
+            elif r["quality"]["is_hevc"] and r["quality"]["has_5_1"]:
+                prio = 2
+            else:
+                prio = 3
+            return (prio, -(r["imdb_rating"] or 0), -r["imdb_votes"])
+
+        results.sort(key=_sort_key)
         logger.info("Search '%s' → %d results (after %dGB filter)", query, len(results), MAX_SIZE_BYTES // 1024 ** 3)
         return jsonify({"results": results})
 
