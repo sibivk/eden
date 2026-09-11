@@ -446,6 +446,43 @@ _CAL_DATE_RE = re.compile(
 _cal_cache: dict = {'data': None, 'at': 0.0, 'year': 0}
 CAL_CACHE_TTL = 3 * 3600  # 3 hours
 
+_LANG_CODE_MAP = {
+    'hi': 'Hindi', 'ml': 'Malayalam', 'ta': 'Tamil', 'te': 'Telugu',
+    'kn': 'Kannada', 'bn': 'Bengali', 'mr': 'Marathi', 'pa': 'Punjabi',
+    'en': 'English', 'gu': 'Gujarati', 'or': 'Odia', 'as': 'Assamese',
+    'ur': 'Urdu', 'sa': 'Sanskrit', 'ne': 'Nepali', 'si': 'Sinhala',
+    'ko': 'Korean', 'ja': 'Japanese', 'zh': 'Chinese', 'fr': 'French',
+    'es': 'Spanish', 'de': 'German', 'it': 'Italian', 'pt': 'Portuguese',
+    'ru': 'Russian', 'ar': 'Arabic', 'tr': 'Turkish', 'th': 'Thai',
+    'id': 'Indonesian', 'ms': 'Malay', 'vi': 'Vietnamese',
+}
+_lang_cache: dict = {}  # title.lower() -> language string
+
+
+def _tmdb_language(title: str) -> str:
+    """Return display-name language for a movie title via TMDB original_language."""
+    key = title.lower().strip()
+    if key in _lang_cache:
+        return _lang_cache[key]
+    if not TMDB_API_KEY:
+        return ''
+    try:
+        resp = requests.get(
+            'https://api.themoviedb.org/3/search/movie',
+            params={'api_key': TMDB_API_KEY, 'query': title, 'language': 'en-US', 'page': 1},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        results = resp.json().get('results', [])
+        lang_code = results[0].get('original_language', '') if results else ''
+        lang = _LANG_CODE_MAP.get(lang_code, lang_code.upper() if lang_code else '')
+        _lang_cache[key] = lang
+        return lang
+    except Exception as e:
+        logger.warning('TMDB language lookup for %s: %s', title, e)
+        _lang_cache[key] = ''
+        return ''
+
 
 def _scrape_calendar(year: int) -> list:
     """
@@ -509,9 +546,16 @@ def _scrape_calendar(year: int) -> list:
                 if not poster.startswith('http'):
                     poster = ''
 
-            movies.append({'title': title, 'month': mo, 'day': dy, 'poster': poster})
+            movies.append({'title': title, 'month': mo, 'day': dy, 'poster': poster, 'language': ''})
 
     movies.sort(key=lambda x: (x['month'], x['day']))
+
+    # Enrich with TMDB original_language (rate-limited to avoid hammering the API)
+    for i, m in enumerate(movies):
+        if i > 0:
+            time.sleep(0.12)   # ~8 req/s, well within TMDB free-tier limits
+        m['language'] = _tmdb_language(m['title'])
+
     logger.info('Calendar: scraped %d movies for %d', len(movies), year)
     return movies
 
