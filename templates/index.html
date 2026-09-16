@@ -53,15 +53,18 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
   overflow: hidden;
 }
 
-.hero-bg {
+.hero-bg, .hero-bg-next {
   position: absolute; inset: 0;
   background: linear-gradient(135deg, #0d1b3e 0%, #060a14 50%, #1a0633 100%);
   background-size: cover;
   background-position: center top;
-  transition: background-image 1s ease;
 }
-
-.hero-bg::after {
+.hero-bg-next {
+  opacity: 0;
+  z-index: 1;
+  transition: opacity 1.4s ease;
+}
+.hero-bg::after, .hero-bg-next::after {
   content: '';
   position: absolute; inset: 0;
   background: linear-gradient(to bottom,
@@ -795,6 +798,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
     <!-- Hero -->
     <section class="hero">
       <div class="hero-bg" id="heroBg"></div>
+      <div class="hero-bg-next" id="heroBgNext"></div>
       <div class="hero-vfx"></div>
 
       <div class="hero-header">
@@ -1005,7 +1009,6 @@ async function loadCatalog() {
     container.innerHTML = '';
 
     const langOrder = ['malayalam', 'hindi', 'tamil', 'english'];
-    let heroSet = false;
     let anyRow  = false;
 
     for (const lang of langOrder) {
@@ -1039,10 +1042,6 @@ async function loadCatalog() {
         posterObserver.observe(card);
       });
 
-      if (!heroSet && movies[0]) {
-        heroSet = true;
-        loadHeroBackdrop(movies[0].title, movies[0].year || '');
-      }
     }
 
     if (!anyRow) {
@@ -1051,6 +1050,12 @@ async function loadCatalog() {
           No movies in your Plex library yet.<br>
           <span style="font-size:0.8rem;opacity:0.6">Movies appear here once they're downloaded and moved.</span>
         </div>`;
+    }
+
+    // Start backdrop cycle: top-5 of each language in round-robin order
+    if (data.library) {
+      _backdropQueue = _buildBackdropQueue(data.library);
+      _startBackdropCycle();
     }
 
     _catalogLoaded = true;
@@ -1119,19 +1124,76 @@ function fetchPoster(card) {
     .catch(() => {});
 }
 
-async function loadHeroBackdrop(title, year) {
+/* ─── Hero backdrop cycler ─── */
+let _backdropQueue  = [];   // [{title, year, lang}, ...]
+let _backdropIdx    = 0;
+let _backdropTimer  = null;
+let _backdropActive = false;
+
+async function _fetchBackdropUrl(title, year) {
   try {
-    const data = await fetch(`/api/poster?title=${encodeURIComponent(title)}&year=${encodeURIComponent(year)}`)
-      .then(r => r.json());
-    if (data.backdrop) {
-      const heroBg = document.getElementById('heroBg');
-      const img = new Image();
-      img.onload = () => {
-        heroBg.style.backgroundImage = `url(${data.backdrop})`;
-      };
-      img.src = data.backdrop;
+    const d = await fetch(
+      `/api/poster?title=${encodeURIComponent(title)}&year=${encodeURIComponent(year)}`
+    ).then(r => r.json());
+    return d.backdrop || '';
+  } catch (_) { return ''; }
+}
+
+function _crossfadeTo(url) {
+  if (!url) return;
+  const base = document.getElementById('heroBg');
+  const next = document.getElementById('heroBgNext');
+  const img  = new Image();
+  img.onload = () => {
+    next.style.backgroundImage = `url(${url})`;
+    next.style.opacity = '1';
+    setTimeout(() => {
+      base.style.backgroundImage = `url(${url})`;
+      next.style.transition = 'none';
+      next.style.opacity = '0';
+      setTimeout(() => { next.style.transition = 'opacity 1.4s ease'; }, 50);
+    }, 1500);
+  };
+  img.src = url;
+}
+
+async function _showBackdropAt(idx) {
+  const entry = _backdropQueue[idx];
+  if (!entry) return;
+  const url = await _fetchBackdropUrl(entry.title, entry.year || '');
+  _crossfadeTo(url);
+}
+
+function _startBackdropCycle() {
+  if (_backdropActive || _backdropQueue.length === 0) return;
+  _backdropActive = true;
+  _showBackdropAt(0);
+  _backdropTimer = setInterval(() => {
+    _backdropIdx = (_backdropIdx + 1) % _backdropQueue.length;
+    _showBackdropAt(_backdropIdx);
+  }, 5000);
+}
+
+function _buildBackdropQueue(library) {
+  // Round-robin: Malayalam[0], Hindi[0], Tamil[0], Malayalam[1], Hindi[1]…
+  const order = ['malayalam', 'hindi', 'tamil'];
+  const top5  = {};
+  for (const lang of order) {
+    top5[lang] = (library[lang] || []).slice(0, 5);
+  }
+  const queue = [];
+  for (let i = 0; i < 5; i++) {
+    for (const lang of order) {
+      if (top5[lang][i]) queue.push(top5[lang][i]);
     }
-  } catch (_) {}
+  }
+  return queue;
+}
+
+// Legacy shim — still called from poster cards when hovered
+async function loadHeroBackdrop(title, year) {
+  const url = await _fetchBackdropUrl(title, year);
+  _crossfadeTo(url);
 }
 
 /* ─── Scroll row left/right ─── */
