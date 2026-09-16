@@ -590,31 +590,58 @@ def process_completed_files():
             logger.warning('Completed file not found in container: %s', src)
             continue
 
-        # Extract title + year from filename
+        # Extract title + year — try filename stem first, then parent folder name as fallback.
+        # The parent folder is set by NZBGet and usually has the correct spelling even when
+        # the NZB filename inside contains a typo (e.g. "Mashrooms" vs "Mushrooms").
+        def _clean_title(raw: str) -> tuple:
+            t, y = _extract_name_year(raw)
+            t = re.sub(
+                r'\s*\((?:malayalam|hindi|tamil|english|telugu|kannada)\)\s*',
+                '', t, flags=re.IGNORECASE,
+            ).strip()
+            return t, y
+
         raw_name = src.stem if src.is_file() else src.name
-        movie_title, movie_year = _extract_name_year(raw_name)
-        # Strip embedded language tags like "(Tamil)", "(Hindi)" that NZBGet sometimes
-        # appends to filenames — they corrupt the DB key and break the lookup
-        movie_title = re.sub(
-            r'\s*\((?:malayalam|hindi|tamil|english|telugu|kannada)\)\s*',
-            '', movie_title, flags=re.IGNORECASE
-        ).strip()
+        movie_title, movie_year = _clean_title(raw_name)
         key = _db_key(movie_title, movie_year)
+
+        # Also compute folder-based title/year as a backup lookup source
+        folder_name = src.parent.name if src.is_file() and src.parent != STORAGE_MOUNT else None
+        if folder_name:
+            folder_title, folder_year = _clean_title(folder_name)
+            folder_key = _db_key(folder_title, folder_year or movie_year)
+        else:
+            folder_title = folder_year = folder_key = None
 
         # Look up language in tracking DB
         with _db_lock:
             db = _load_db()
-        entry = db.get('downloads', {}).get(key)
+        downloads = db.get('downloads', {})
+        entry = downloads.get(key)
+
+        # If filename lookup fails, try folder name (handles typos in NZB filenames)
+        if not entry and folder_key:
+            entry = downloads.get(folder_key)
+            if entry:
+                logger.info('DB lookup: filename "%s" missed, matched via folder "%s"', raw_name, folder_name)
+                movie_title, movie_year = folder_title, folder_year or movie_year
+                key = folder_key
 
         if not entry:
-            # Fuzzy fallback: match against stored title values (handles year mismatches
-            # and cases where the extracted title differs slightly from the queued title)
+            # Fuzzy fallback: match against stored title values (handles minor mismatches).
+            # Guard against entries with None title to avoid AttributeError.
             norm = _norm(movie_title)
+            fold_norm = _norm(folder_title) if folder_title else ''
             entry = next(
-                (v for v in db.get('downloads', {}).values()
-                 if norm in _norm(v.get('title', '')) or _norm(v.get('title', '')) in norm),
+                (v for v in downloads.values()
+                 if v.get('title') and (
+                     norm in _norm(v['title']) or _norm(v['title']) in norm
+                     or (fold_norm and (fold_norm in _norm(v['title']) or _norm(v['title']) in fold_norm))
+                 )),
                 None
             )
+            if entry:
+                logger.info('DB lookup: fuzzy matched "%s" to "%s"', movie_title, entry.get('title'))
 
         if not entry:
             logger.warning('No tracking entry for "%s" — cannot move (run through the UI first)', raw_name)
