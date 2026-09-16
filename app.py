@@ -314,6 +314,17 @@ _YT_HEADERS = {
     'Accept-Language': 'en-US,en;q=0.9',
 }
 
+def _yt_key_valid(key: str) -> bool:
+    """Quick check: is this YouTube video publicly available?"""
+    try:
+        r = requests.get(
+            f'https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={key}&format=json',
+            timeout=5,
+        )
+        return r.status_code == 200
+    except Exception:
+        return True  # assume valid on network error
+
 def _youtube_search_trailer(title: str, year: str = '') -> str:
     """Scrape first YouTube video ID from search for '{title} {year} official trailer'."""
     import urllib.parse, re as _re
@@ -716,6 +727,11 @@ def api_movie_detail():
             r.raise_for_status()
             results = r.json().get('results', [])
         if not results:
+            # No TMDB match — still try YouTube search for trailer
+            try:
+                result['trailer_key'] = _youtube_search_trailer(title, year) or ''
+            except Exception as ye:
+                logger.warning('youtube fallback (no tmdb) for %s: %s', title, ye)
             _detail_cache[cache_key] = dict(result, _at=time.time())
             return jsonify(result)
 
@@ -763,12 +779,13 @@ def api_movie_detail():
             vr2.raise_for_status()
             trailer = _pick_trailer(vr2.json().get('results', []))
         if trailer:
-            result['trailer_key'] = trailer['key']
+            key = trailer['key']
+            result['trailer_key'] = key if _yt_key_valid(key) else ''
 
     except Exception as e:
         logger.warning('movie-detail for %s: %s', title, e)
 
-    # Final fallback: scrape YouTube search if TMDB has no trailer
+    # Final fallback: scrape YouTube search if TMDB has no trailer or key is dead
     if not result['trailer_key']:
         try:
             result['trailer_key'] = _youtube_search_trailer(title, year) or ''

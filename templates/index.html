@@ -851,19 +851,21 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 0.85rem;
 }
-/* Transparent layer above iframe to absorb hover so YouTube never shows controls */
+/* Dark overlay above iframe — shows movie title for 5s, then fades but stays
+   to block hover events so YouTube controls never appear */
 .modal-trailer-overlay {
   position: absolute; inset: 0; z-index: 5;
-  background: transparent; cursor: default;
+  background: rgba(0,0,0,0.92);
+  display: flex; align-items: center; justify-content: center;
+  cursor: default;
+  transition: opacity 1.2s ease;
 }
-.modal-unmute-btn {
-  position: absolute; bottom: 12px; right: 12px; z-index: 10;
-  background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.2);
-  color: #fff; border-radius: 6px; padding: 5px 10px;
-  font-size: 0.78rem; cursor: pointer; backdrop-filter: blur(4px);
-  transition: background 0.15s;
+.modal-trailer-overlay-title {
+  color: #fff; font-size: 1.05rem; font-weight: 600;
+  text-align: center; padding: 0 20px;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+  pointer-events: none;
 }
-.modal-unmute-btn:hover { background: rgba(0,0,0,0.85); }
 
 .modal-meta { display: flex; flex-direction: column; gap: 6px; }
 .modal-overview {
@@ -1323,6 +1325,7 @@ function _stopTrailer() {
 
 function closeMovieModal() {
   _stopTrailer();
+  if (_ytMsgHandler) { window.removeEventListener('message', _ytMsgHandler); _ytMsgHandler = null; }
   const modal = document.getElementById('movieModal');
   modal.classList.remove('open');
   document.body.style.overflow = '';
@@ -1330,20 +1333,34 @@ function closeMovieModal() {
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMovieModal(); });
 
-let _isMuted = true;
-function toggleMuteTrailer(btn) {
+let _ytMsgHandler = null;
+
+function _setupAutoUnmute() {
   const iframe = document.getElementById('trailerIframe');
   if (!iframe) return;
-  _isMuted = !_isMuted;
-  iframe.contentWindow.postMessage(
-    JSON.stringify({ event: 'command', func: _isMuted ? 'mute' : 'unMute', args: [] }),
-    '*'
-  );
-  btn.textContent = _isMuted ? '🔇 Tap for sound' : '🔊 Sound on';
+  let done = false;
+  if (_ytMsgHandler) window.removeEventListener('message', _ytMsgHandler);
+  _ytMsgHandler = (e) => {
+    if (done) return;
+    try {
+      const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+      const state = data?.info?.playerState;
+      if (state === 1) {
+        done = true;
+        iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
+        iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [80] }), '*');
+      }
+    } catch (_) {}
+  };
+  window.addEventListener('message', _ytMsgHandler);
+  // Fade overlay from black to transparent after 5s, keeping it in DOM to block hover
+  setTimeout(() => {
+    const ov = document.getElementById('trailerOverlay');
+    if (ov) { ov.style.opacity = '0'; ov.style.background = 'transparent'; }
+  }, 5000);
 }
 
 function _renderModal(title, year, d) {
-  _isMuted = true;
   const body = document.getElementById('modalBody');
   if (!body) return;
 
@@ -1355,8 +1372,9 @@ function _renderModal(title, year, d) {
     ? `<iframe id="trailerIframe"
          src="https://www.youtube.com/embed/${esc(d.trailer_key)}?autoplay=1&controls=0&mute=1&loop=1&playlist=${esc(d.trailer_key)}&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1&enablejsapi=1"
          allow="autoplay; encrypted-media" allowfullscreen></iframe>
-       <div class="modal-trailer-overlay"></div>
-       <button class="modal-unmute-btn" id="unmuteBtn" onclick="toggleMuteTrailer(this)" title="Unmute">🔇 Tap for sound</button>`
+       <div class="modal-trailer-overlay" id="trailerOverlay">
+         <span class="modal-trailer-overlay-title">${esc(title)}</span>
+       </div>`
     : `<div class="modal-trailer-ph">No trailer available</div>`;
 
   const credits = [];
@@ -1379,6 +1397,7 @@ function _renderModal(title, year, d) {
         </div>
       </div>
     </div>`;
+  if (d.trailer_key) _setupAutoUnmute();
 }
 
 /* ─── Scroll row left/right ─── */
