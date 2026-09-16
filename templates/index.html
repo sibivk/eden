@@ -1078,12 +1078,7 @@ function posterCardHTML(m, lang) {
           <div class="poster-grad-title">${t}</div>
         </div>
         ${y ? `<div class="poster-year-badge">${y}</div>` : ''}
-        <div class="poster-overlay">
-          <button class="poster-grab-btn"
-            onclick="event.stopPropagation();searchForMovie('${titleEnc}','${yearEnc}')">
-            Grab to Plex
-          </button>
-        </div>
+        <div class="poster-overlay"></div>
       </div>
       <div class="poster-label">${t}</div>
       ${y ? `<div class="poster-year">${y}</div>` : ''}
