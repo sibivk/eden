@@ -867,6 +867,15 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
   pointer-events: none;
 }
 
+.modal-unmute-btn {
+  position: absolute; bottom: 12px; right: 12px; z-index: 10;
+  background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.2);
+  color: #fff; border-radius: 6px; padding: 5px 10px;
+  font-size: 0.78rem; cursor: pointer; backdrop-filter: blur(4px);
+  transition: background 0.15s;
+}
+.modal-unmute-btn:hover { background: rgba(0,0,0,0.85); }
+
 .modal-meta { display: flex; flex-direction: column; gap: 6px; }
 .modal-overview {
   font-size: 0.82rem; color: rgba(255,255,255,0.72); line-height: 1.6;
@@ -1325,7 +1334,6 @@ function _stopTrailer() {
 
 function closeMovieModal() {
   _stopTrailer();
-  if (_ytMsgHandler) { window.removeEventListener('message', _ytMsgHandler); _ytMsgHandler = null; }
   const modal = document.getElementById('movieModal');
   modal.classList.remove('open');
   document.body.style.overflow = '';
@@ -1333,45 +1341,27 @@ function closeMovieModal() {
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMovieModal(); });
 
-let _ytMsgHandler = null;
+let _isMuted = true;
 
-function _sendUnmute() {
+function toggleMuteTrailer(btn) {
   const fr = document.getElementById('trailerIframe');
   if (!fr) return;
-  try {
-    fr.contentWindow.postMessage(
-      JSON.stringify({ event: 'command', func: 'unMute', args: [] }),
-      'https://www.youtube.com'
-    );
+  _isMuted = !_isMuted;
+  fr.contentWindow.postMessage(
+    JSON.stringify({ event: 'command', func: _isMuted ? 'mute' : 'unMute', args: [] }),
+    'https://www.youtube.com'
+  );
+  if (!_isMuted) {
     fr.contentWindow.postMessage(
       JSON.stringify({ event: 'command', func: 'setVolume', args: [80] }),
       'https://www.youtube.com'
     );
-  } catch (_) {}
+  }
+  btn.textContent = _isMuted ? '🔇 Tap for sound' : '🔊 Sound on';
 }
 
-function _setupAutoUnmute() {
-  let unmuted = false;
-  if (_ytMsgHandler) window.removeEventListener('message', _ytMsgHandler);
-
-  // YouTube sends a postMessage to the parent as soon as the player initialises
-  // (onReady). We unmute on the first message we receive from youtube.com.
-  _ytMsgHandler = (e) => {
-    if (unmuted) return;
-    if (e.origin !== 'https://www.youtube.com') return;
-    unmuted = true;
-    _sendUnmute();
-    window.removeEventListener('message', _ytMsgHandler);
-    _ytMsgHandler = null;
-  };
-  window.addEventListener('message', _ytMsgHandler);
-
-  // Belt-and-suspenders: also try after fixed delays in case the message was
-  // already fired before we started listening, or the listener misses it.
-  setTimeout(() => { if (!unmuted) { unmuted = true; _sendUnmute(); } }, 2500);
-  setTimeout(() => _sendUnmute(), 4500); // extra retry regardless
-
-  // Fade overlay to transparent after 5s (stays in DOM to block hover events)
+function _setupOverlayFade() {
+  // Fade the black title overlay to transparent after 5s (stays in DOM to block hover)
   setTimeout(() => {
     const ov = document.getElementById('trailerOverlay');
     if (ov) { ov.style.opacity = '0'; ov.style.background = 'transparent'; }
@@ -1392,7 +1382,8 @@ function _renderModal(title, year, d) {
          allow="autoplay; encrypted-media" allowfullscreen></iframe>
        <div class="modal-trailer-overlay" id="trailerOverlay">
          <span class="modal-trailer-overlay-title">${esc(title)}</span>
-       </div>`
+       </div>
+       <button class="modal-unmute-btn" id="unmuteBtn" onclick="toggleMuteTrailer(this)">🔇 Tap for sound</button>`
     : `<div class="modal-trailer-ph">No trailer available</div>`;
 
   const credits = [];
@@ -1415,7 +1406,8 @@ function _renderModal(title, year, d) {
         </div>
       </div>
     </div>`;
-  if (d.trailer_key) _setupAutoUnmute();
+  _isMuted = true;
+  if (d.trailer_key) _setupOverlayFade();
 }
 
 /* ─── Scroll row left/right ─── */
