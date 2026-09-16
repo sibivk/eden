@@ -1335,25 +1335,43 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMovieMo
 
 let _ytMsgHandler = null;
 
+function _sendUnmute() {
+  const fr = document.getElementById('trailerIframe');
+  if (!fr) return;
+  try {
+    fr.contentWindow.postMessage(
+      JSON.stringify({ event: 'command', func: 'unMute', args: [] }),
+      'https://www.youtube.com'
+    );
+    fr.contentWindow.postMessage(
+      JSON.stringify({ event: 'command', func: 'setVolume', args: [80] }),
+      'https://www.youtube.com'
+    );
+  } catch (_) {}
+}
+
 function _setupAutoUnmute() {
-  const iframe = document.getElementById('trailerIframe');
-  if (!iframe) return;
-  let done = false;
+  let unmuted = false;
   if (_ytMsgHandler) window.removeEventListener('message', _ytMsgHandler);
+
+  // YouTube sends a postMessage to the parent as soon as the player initialises
+  // (onReady). We unmute on the first message we receive from youtube.com.
   _ytMsgHandler = (e) => {
-    if (done) return;
-    try {
-      const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
-      const state = data?.info?.playerState;
-      if (state === 1) {
-        done = true;
-        iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
-        iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [80] }), '*');
-      }
-    } catch (_) {}
+    if (unmuted) return;
+    if (e.origin !== 'https://www.youtube.com') return;
+    unmuted = true;
+    _sendUnmute();
+    window.removeEventListener('message', _ytMsgHandler);
+    _ytMsgHandler = null;
   };
   window.addEventListener('message', _ytMsgHandler);
-  // Fade overlay from black to transparent after 5s, keeping it in DOM to block hover
+
+  // Belt-and-suspenders: also try after fixed delays in case the message was
+  // already fired before we started listening, or the listener misses it.
+  setTimeout(() => { if (!unmuted) { unmuted = true; _sendUnmute(); } }, 2500);
+  setTimeout(() => _sendUnmute(), 4500); // extra retry regardless
+
+  // Fade overlay to transparent after 5s (stays in DOM to block hover events)
   setTimeout(() => {
     const ov = document.getElementById('trailerOverlay');
     if (ov) { ov.style.opacity = '0'; ov.style.background = 'transparent'; }
