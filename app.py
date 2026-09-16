@@ -722,17 +722,26 @@ def api_movie_detail():
         result['writers']  = writers[:3]
         result['stars']    = [c['name'] for c in cast[:4]]
 
-        # 3. Videos (YouTube trailer)
+        # 3. Videos (YouTube trailer) — try en-US first, fall back to all languages
+        def _pick_trailer(videos):
+            return next(
+                (v for v in videos if v.get('site') == 'YouTube' and v.get('type') == 'Trailer'),
+                next((v for v in videos if v.get('site') == 'YouTube'), None),
+            )
+
         vr = requests.get(
             f'https://api.themoviedb.org/3/movie/{movie_id}/videos',
             params={'api_key': TMDB_API_KEY, 'language': 'en-US'}, timeout=8,
         )
         vr.raise_for_status()
-        videos = vr.json().get('results', [])
-        trailer = next(
-            (v for v in videos if v.get('site') == 'YouTube' and v.get('type') == 'Trailer'),
-            next((v for v in videos if v.get('site') == 'YouTube'), None),
-        )
+        trailer = _pick_trailer(vr.json().get('results', []))
+        if not trailer:
+            vr2 = requests.get(
+                f'https://api.themoviedb.org/3/movie/{movie_id}/videos',
+                params={'api_key': TMDB_API_KEY}, timeout=8,
+            )
+            vr2.raise_for_status()
+            trailer = _pick_trailer(vr2.json().get('results', []))
         if trailer:
             result['trailer_key'] = trailer['key']
 

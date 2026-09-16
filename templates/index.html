@@ -840,11 +840,25 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
   position: relative; width: 100%; aspect-ratio: 16/9;
   border-radius: 10px; overflow: hidden; background: #000;
 }
-.modal-trailer iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
+/* Iframe is oversized and offset to hide the YouTube chrome top/bottom bars */
+.modal-trailer iframe {
+  position: absolute;
+  top: -10%; left: -3%;
+  width: 106%; height: 120%;
+  border: none; pointer-events: auto;
+}
 .modal-trailer-ph {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 0.85rem;
 }
+.modal-unmute-btn {
+  position: absolute; bottom: 12px; right: 12px; z-index: 10;
+  background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.2);
+  color: #fff; border-radius: 6px; padding: 5px 10px;
+  font-size: 0.78rem; cursor: pointer; backdrop-filter: blur(4px);
+  transition: background 0.15s;
+}
+.modal-unmute-btn:hover { background: rgba(0,0,0,0.85); }
 
 .modal-meta { display: flex; flex-direction: column; gap: 6px; }
 .modal-overview {
@@ -1204,18 +1218,22 @@ function fetchPoster(card) {
 }
 
 /* ─── Hero backdrop cycler ─── */
-let _backdropQueue  = [];   // [{title, year, lang}, ...]
-let _backdropIdx    = 0;
-let _backdropTimer  = null;
-let _backdropActive = false;
+let _backdropQueue   = [];   // [{title, year, lang}, ...]
+let _backdropIdx     = 0;
+let _backdropTimer   = null;
+let _backdropActive  = false;
+const _backdropCache = {};   // "title|year" → url (JS-side, avoids repeat fetches)
 
 async function _fetchBackdropUrl(title, year) {
+  const key = title + '|' + (year || '');
+  if (_backdropCache[key] !== undefined) return _backdropCache[key];
   try {
     const d = await fetch(
       `/api/poster?title=${encodeURIComponent(title)}&year=${encodeURIComponent(year)}`
     ).then(r => r.json());
-    return d.backdrop || '';
-  } catch (_) { return ''; }
+    _backdropCache[key] = d.backdrop || '';
+  } catch (_) { _backdropCache[key] = ''; }
+  return _backdropCache[key];
 }
 
 function _crossfadeTo(url) {
@@ -1307,7 +1325,20 @@ function closeMovieModal() {
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMovieModal(); });
 
+let _isMuted = true;
+function toggleMuteTrailer(btn) {
+  const iframe = document.getElementById('trailerIframe');
+  if (!iframe) return;
+  _isMuted = !_isMuted;
+  iframe.contentWindow.postMessage(
+    JSON.stringify({ event: 'command', func: _isMuted ? 'mute' : 'unMute', args: [] }),
+    '*'
+  );
+  btn.textContent = _isMuted ? '🔇 Tap for sound' : '🔊 Sound on';
+}
+
 function _renderModal(title, year, d) {
+  _isMuted = true;
   const body = document.getElementById('modalBody');
   if (!body) return;
 
@@ -1317,8 +1348,9 @@ function _renderModal(title, year, d) {
 
   const trailerHTML = d.trailer_key
     ? `<iframe id="trailerIframe"
-         src="https://www.youtube.com/embed/${esc(d.trailer_key)}?autoplay=1&controls=0&mute=1&loop=1&playlist=${esc(d.trailer_key)}&rel=0&modestbranding=1"
-         allow="autoplay; encrypted-media" allowfullscreen></iframe>`
+         src="https://www.youtube.com/embed/${esc(d.trailer_key)}?autoplay=1&controls=0&mute=1&loop=1&playlist=${esc(d.trailer_key)}&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1&enablejsapi=1"
+         allow="autoplay; encrypted-media" allowfullscreen></iframe>
+       <button class="modal-unmute-btn" id="unmuteBtn" onclick="toggleMuteTrailer(this)" title="Unmute">🔇 Tap for sound</button>`
     : `<div class="modal-trailer-ph">No trailer available</div>`;
 
   const credits = [];
