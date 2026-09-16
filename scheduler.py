@@ -51,6 +51,7 @@ NEWZNAB_NS     = '{http://www.newznab.com/DTD/2010/feeds/attributes/}'
 TARGET_LANGS   = {'malayalam', 'hindi', 'tamil'}
 PROTECTED_DIRS = {'preroll', 'temp'}   # compared case-insensitively
 OTT_URL        = 'https://www.ottmovierelease.com'
+EINTHUSAN_URL  = 'https://einthusan.tv/movie/results/?find=Recent&lang={lang}&page=1'
 
 # Plex
 PLEX_URL      = os.getenv('PLEX_URL', '')
@@ -360,6 +361,52 @@ def scrape_ott_movies() -> list:
     return movies
 
 
+def scrape_einthusan() -> list:
+    """
+    Scrape page 1 of einthusan.tv Recently Added for each target language.
+    Returns: [{'title': str, 'language': str, 'year': str|None}]
+    Language map: einthusan uses 'malayalam'/'hindi'/'tamil' — matches TARGET_LANGS.
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+                      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Encoding': 'gzip, deflate, br',
+    }
+    movies = []
+    seen: set = set()
+    for lang in sorted(TARGET_LANGS):
+        try:
+            resp = requests.get(
+                EINTHUSAN_URL.format(lang=lang), timeout=15, headers=headers,
+            )
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            count = 0
+            for li in soup.select('ul li'):
+                title_el = li.select_one('a.title h3')
+                if not title_el:
+                    continue
+                title = title_el.get_text(strip=True)
+                if not title:
+                    continue
+                info = li.select_one('.info p')
+                year_text = info.get_text(strip=True) if info else ''
+                yr = re.search(r'((?:19|20)\d{2})', year_text)
+                year = yr.group(1) if yr else None
+                key = (_norm(title), lang)
+                if key in seen:
+                    continue
+                seen.add(key)
+                movies.append({'title': title, 'language': lang, 'year': year})
+                count += 1
+            logger.info('Einthusan scrape [%s]: %d movies', lang, count)
+        except Exception as e:
+            logger.error('Einthusan scrape failed for %s: %s', lang, e)
+    logger.info('Einthusan total: %d movies across %d languages', len(movies), len(TARGET_LANGS))
+    return movies
+
+
 # ── nzbs.in search ────────────────────────────────────────────────────────────
 
 def search_1080p(title: str) -> list:
@@ -471,11 +518,25 @@ def _record_job_run(scraped: int, queued: int, skipped: int, no_nzb: int, status
 
 def auto_download_job():
     logger.info('=== Auto-download job started ===')
-    movies = scrape_ott_movies()
+    ott_movies = scrape_ott_movies()
+    ein_movies = scrape_einthusan()
+
+    # Merge both sources — deduplicate by (norm_title, language)
+    seen_keys: set = set()
+    movies = []
+    for m in ott_movies + ein_movies:
+        key = (_norm(m['title']), m['language'])
+        if key not in seen_keys:
+            seen_keys.add(key)
+            movies.append(m)
+
     if not movies:
-        logger.warning('Nothing scraped from OTT site — aborting')
+        logger.warning('Nothing scraped from any source — aborting')
         _record_job_run(scraped=0, queued=0, skipped=0, no_nzb=0, status='scrape_failed')
         return
+
+    logger.info('Merged sources: %d unique movies (OTT=%d, Einthusan=%d)',
+                len(movies), len(ott_movies), len(ein_movies))
 
     queued = skipped_exists = skipped_no_nzb = 0
 
@@ -521,7 +582,7 @@ def auto_download_job():
         else:
             logger.error('✗ Failed to queue "%s" to NZBGet', title)
 
-    logger.info('=== Auto-download done: %d queued | %d in library | %d no NZB ===',
+    logger.info('=== Auto-download done: %d queued | %d skipped | %d no NZB ===',
                 queued, skipped_exists, skipped_no_nzb)
     status = 'queued_some' if queued > 0 else ('all_skipped' if skipped_exists > 0 else 'nothing_found')
     _record_job_run(scraped=len(movies), queued=queued,
