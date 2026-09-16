@@ -306,6 +306,7 @@ PLEX_SECTIONS = {
     'english':   os.getenv('PLEX_SECTION_ENGLISH', ''),
 }
 _poster_cache: dict = {}
+_detail_cache: dict = {}   # title+year → {poster, trailer_key, overview, director, writers, stars}
 
 # Only allow well-formed Plex metadata thumb/art paths to prevent SSRF
 _PLEX_PATH_RE = re.compile(r'^/library/metadata/\d+/(?:thumb|art)(?:/\d+)?$')
@@ -657,6 +658,89 @@ def api_poster():
 
     _poster_cache[cache_key] = {'poster': poster, 'backdrop': backdrop, 'at': time.time()}
     return jsonify({'poster': poster, 'backdrop': backdrop})
+
+
+@app.route('/api/movie-detail', methods=['GET'])
+def api_movie_detail():
+    """Return trailer key, synopsis, and credits for a movie via TMDB."""
+    title = request.args.get('title', '').strip()[:200]
+    year  = request.args.get('year',  '').strip()[:4]
+    if not title:
+        return jsonify({'error': 'missing title'}), 400
+
+    cache_key = f'{title.lower()}|{year}'
+    cached = _detail_cache.get(cache_key)
+    if cached and time.time() - cached.get('_at', 0) < 86400:
+        payload = {k: v for k, v in cached.items() if k != '_at'}
+        return jsonify(payload)
+
+    if not TMDB_API_KEY:
+        return jsonify({'error': 'TMDB not configured'}), 503
+
+    result = {
+        'poster': '', 'backdrop': '', 'trailer_key': '',
+        'overview': '', 'director': '', 'writers': [], 'stars': [],
+    }
+
+    try:
+        # 1. Find movie
+        p = {'api_key': TMDB_API_KEY, 'query': title, 'language': 'en-US', 'page': 1}
+        if year:
+            p['primary_release_year'] = year
+        r = requests.get('https://api.themoviedb.org/3/search/movie', params=p, timeout=8)
+        r.raise_for_status()
+        results = r.json().get('results', [])
+        if not results and year:
+            p.pop('primary_release_year', None)
+            r = requests.get('https://api.themoviedb.org/3/search/movie', params=p, timeout=8)
+            r.raise_for_status()
+            results = r.json().get('results', [])
+        if not results:
+            _detail_cache[cache_key] = dict(result, _at=time.time())
+            return jsonify(result)
+
+        movie = results[0]
+        movie_id = movie['id']
+        pp = movie.get('poster_path', '')
+        bp = movie.get('backdrop_path', '')
+        if pp: result['poster']   = f'https://image.tmdb.org/t/p/w500{pp}'
+        if bp: result['backdrop'] = f'https://image.tmdb.org/t/p/w1280{bp}'
+        result['overview'] = movie.get('overview', '')
+
+        # 2. Credits
+        cr = requests.get(
+            f'https://api.themoviedb.org/3/movie/{movie_id}/credits',
+            params={'api_key': TMDB_API_KEY}, timeout=8,
+        )
+        cr.raise_for_status()
+        crew = cr.json().get('crew', [])
+        cast = cr.json().get('cast', [])
+        directors = [c['name'] for c in crew if c.get('job') == 'Director']
+        writers   = [c['name'] for c in crew
+                     if c.get('department') == 'Writing' and c.get('job') in ('Writer', 'Screenplay', 'Story')]
+        result['director'] = ', '.join(directors[:2])
+        result['writers']  = writers[:3]
+        result['stars']    = [c['name'] for c in cast[:4]]
+
+        # 3. Videos (YouTube trailer)
+        vr = requests.get(
+            f'https://api.themoviedb.org/3/movie/{movie_id}/videos',
+            params={'api_key': TMDB_API_KEY, 'language': 'en-US'}, timeout=8,
+        )
+        vr.raise_for_status()
+        videos = vr.json().get('results', [])
+        trailer = next(
+            (v for v in videos if v.get('site') == 'YouTube' and v.get('type') == 'Trailer'),
+            next((v for v in videos if v.get('site') == 'YouTube'), None),
+        )
+        if trailer:
+            result['trailer_key'] = trailer['key']
+
+    except Exception as e:
+        logger.warning('movie-detail for %s: %s', title, e)
+
+    _detail_cache[cache_key] = dict(result, _at=time.time())
+    return jsonify(result)
 
 
 @app.route('/api/plex-img', methods=['GET'])

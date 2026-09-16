@@ -784,11 +784,94 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
   -webkit-box-orient: vertical; overflow: hidden;
 }
 .cal-lang { color: var(--muted); font-weight: 400; }
+
+/* ── Movie detail modal ── */
+#movieModal {
+  display: none; position: fixed; inset: 0; z-index: 9000;
+  align-items: center; justify-content: center;
+  background: rgba(4,8,18,0.78); backdrop-filter: blur(10px);
+  animation: modalFadeIn 0.22s ease;
+}
+#movieModal.open { display: flex; }
+@keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-panel {
+  position: relative;
+  background: rgba(10,16,32,0.97);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 18px;
+  box-shadow: 0 32px 80px rgba(0,0,0,0.7);
+  width: min(880px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 28px;
+  display: flex; flex-direction: column; gap: 20px;
+  scrollbar-width: thin; scrollbar-color: #1e293b transparent;
+}
+
+.modal-close {
+  position: absolute; top: 14px; right: 16px;
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+  color: var(--muted); border-radius: 50%; width: 30px; height: 30px;
+  font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.modal-close:hover { background: rgba(255,255,255,0.15); color: var(--text); }
+
+.modal-top {
+  display: flex; gap: 22px; align-items: flex-start;
+}
+.modal-poster {
+  width: 180px; flex-shrink: 0; border-radius: 10px;
+  overflow: hidden; box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+  background: rgba(255,255,255,0.04); aspect-ratio: 2/3;
+}
+.modal-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.modal-poster-ph {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  font-size: 3rem; color: var(--muted);
+}
+
+.modal-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.modal-title { font-size: 1.25rem; font-weight: 700; color: var(--text); line-height: 1.3; }
+.modal-year  { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+
+.modal-trailer {
+  position: relative; width: 100%; aspect-ratio: 16/9;
+  border-radius: 10px; overflow: hidden; background: #000;
+}
+.modal-trailer iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
+.modal-trailer-ph {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 0.85rem;
+}
+
+.modal-meta { display: flex; flex-direction: column; gap: 6px; }
+.modal-overview {
+  font-size: 0.82rem; color: rgba(255,255,255,0.72); line-height: 1.6;
+}
+.modal-credit { font-size: 0.78rem; color: var(--muted); }
+.modal-credit strong { color: rgba(255,255,255,0.75); font-weight: 600; }
+
+.modal-loading { text-align: center; padding: 60px 0; color: var(--muted); font-size: 0.9rem; }
+
+@media (max-width: 600px) {
+  .modal-top { flex-direction: column; }
+  .modal-poster { width: 100%; max-width: 200px; }
+}
 </style>
 </head>
 <body>
 
 <canvas id="stars"></canvas>
+
+<!-- Movie Detail Modal -->
+<div id="movieModal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeMovieModal()">
+  <div class="modal-panel">
+    <button class="modal-close" onclick="closeMovieModal()" title="Close">✕</button>
+    <div id="modalBody"><div class="modal-loading">Loading…</div></div>
+  </div>
+</div>
 
 <div class="layout">
 
@@ -1072,7 +1155,8 @@ function posterCardHTML(m, lang) {
   const yearEnc   = encodeURIComponent(m.year || '');
   return `
     <div class="poster-card" data-title="${t}" data-year="${y}" data-lang="${esc(lang)}"
-         onclick="searchForMovie('${titleEnc}','${yearEnc}')">
+         onclick="openMovieModal('${titleEnc}','${yearEnc}','${esc(lang)}')"
+         style="cursor:pointer">
       <div class="poster-img-wrap">
         <div class="poster-grad pg-${lang}">
           <div class="poster-grad-title">${t}</div>
@@ -1189,6 +1273,74 @@ function _buildBackdropQueue(library) {
 async function loadHeroBackdrop(title, year) {
   const url = await _fetchBackdropUrl(title, year);
   _crossfadeTo(url);
+}
+
+/* ─── Movie detail modal ─── */
+let _modalTrailerKey = '';
+
+function openMovieModal(titleEnc, yearEnc, lang) {
+  const title = decodeURIComponent(titleEnc);
+  const year  = decodeURIComponent(yearEnc);
+  const modal = document.getElementById('movieModal');
+  const body  = document.getElementById('modalBody');
+  body.innerHTML = '<div class="modal-loading">Loading…</div>';
+  modal.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  _stopTrailer();
+  fetch(`/api/movie-detail?title=${titleEnc}&year=${yearEnc}`)
+    .then(r => r.json())
+    .then(d => _renderModal(title, year, d))
+    .catch(() => _renderModal(title, year, {}));
+}
+
+function _stopTrailer() {
+  const old = document.getElementById('trailerIframe');
+  if (old) old.src = '';
+}
+
+function closeMovieModal() {
+  _stopTrailer();
+  const modal = document.getElementById('movieModal');
+  modal.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMovieModal(); });
+
+function _renderModal(title, year, d) {
+  const body = document.getElementById('modalBody');
+  if (!body) return;
+
+  const posterHTML = d.poster
+    ? `<img src="${esc(d.poster)}" alt="" loading="lazy">`
+    : `<div class="modal-poster-ph">🎬</div>`;
+
+  const trailerHTML = d.trailer_key
+    ? `<iframe id="trailerIframe"
+         src="https://www.youtube.com/embed/${esc(d.trailer_key)}?autoplay=1&controls=0&mute=1&loop=1&playlist=${esc(d.trailer_key)}&rel=0&modestbranding=1"
+         allow="autoplay; encrypted-media" allowfullscreen></iframe>`
+    : `<div class="modal-trailer-ph">No trailer available</div>`;
+
+  const credits = [];
+  if (d.director) credits.push(`<div class="modal-credit"><strong>Director:</strong> ${esc(d.director)}</div>`);
+  if (d.writers  && d.writers.length)  credits.push(`<div class="modal-credit"><strong>Writer${d.writers.length > 1 ? 's' : ''}:</strong> ${d.writers.map(esc).join(', ')}</div>`);
+  if (d.stars    && d.stars.length)    credits.push(`<div class="modal-credit"><strong>Stars:</strong> ${d.stars.map(esc).join(', ')}</div>`);
+
+  body.innerHTML = `
+    <div class="modal-top">
+      <div class="modal-poster">${posterHTML}</div>
+      <div class="modal-right">
+        <div>
+          <div class="modal-title">${esc(title)}</div>
+          ${year ? `<div class="modal-year">${esc(year)}</div>` : ''}
+        </div>
+        <div class="modal-trailer">${trailerHTML}</div>
+        <div class="modal-meta">
+          ${d.overview ? `<div class="modal-overview">${esc(d.overview)}</div>` : ''}
+          ${credits.join('')}
+        </div>
+      </div>
+    </div>`;
 }
 
 /* ─── Scroll row left/right ─── */
