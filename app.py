@@ -308,6 +308,26 @@ PLEX_SECTIONS = {
 _poster_cache: dict = {}
 _detail_cache: dict = {}   # title+year → {poster, trailer_key, overview, director, writers, stars}
 
+_YT_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/124 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9',
+}
+
+def _youtube_search_trailer(title: str, year: str = '') -> str:
+    """Scrape first YouTube video ID from search for '{title} {year} official trailer'."""
+    import urllib.parse, re as _re
+    query = urllib.parse.quote_plus(f'{title} {year} official trailer'.strip())
+    # &sp=EgIQAQ%3D%3D filters to videos only
+    url = f'https://www.youtube.com/results?search_query={query}&sp=EgIQAQ%3D%3D'
+    try:
+        r = requests.get(url, headers=_YT_HEADERS, timeout=10)
+        r.raise_for_status()
+        m = _re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', r.text)
+        return m.group(1) if m else ''
+    except Exception:
+        return ''
+
 # Only allow well-formed Plex metadata thumb/art paths to prevent SSRF
 _PLEX_PATH_RE = re.compile(r'^/library/metadata/\d+/(?:thumb|art)(?:/\d+)?$')
 
@@ -747,6 +767,13 @@ def api_movie_detail():
 
     except Exception as e:
         logger.warning('movie-detail for %s: %s', title, e)
+
+    # Final fallback: scrape YouTube search if TMDB has no trailer
+    if not result['trailer_key']:
+        try:
+            result['trailer_key'] = _youtube_search_trailer(title, year) or ''
+        except Exception as e:
+            logger.warning('youtube trailer fallback for %s: %s', title, e)
 
     _detail_cache[cache_key] = dict(result, _at=time.time())
     return jsonify(result)

@@ -851,6 +851,11 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 0.85rem;
 }
+/* Transparent layer above iframe to absorb hover so YouTube never shows controls */
+.modal-trailer-overlay {
+  position: absolute; inset: 0; z-index: 5;
+  background: transparent; cursor: default;
+}
 .modal-unmute-btn {
   position: absolute; bottom: 12px; right: 12px; z-index: 10;
   background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.2);
@@ -1350,6 +1355,7 @@ function _renderModal(title, year, d) {
     ? `<iframe id="trailerIframe"
          src="https://www.youtube.com/embed/${esc(d.trailer_key)}?autoplay=1&controls=0&mute=1&loop=1&playlist=${esc(d.trailer_key)}&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1&enablejsapi=1"
          allow="autoplay; encrypted-media" allowfullscreen></iframe>
+       <div class="modal-trailer-overlay"></div>
        <button class="modal-unmute-btn" id="unmuteBtn" onclick="toggleMuteTrailer(this)" title="Unmute">🔇 Tap for sound</button>`
     : `<div class="modal-trailer-ph">No trailer available</div>`;
 
