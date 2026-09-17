@@ -315,13 +315,28 @@ _YT_HEADERS = {
 }
 
 def _yt_key_valid(key: str) -> bool:
-    """Quick check: is this YouTube video publicly available?"""
+    """Check that a YouTube video is publicly playable (not just metadata-present)."""
+    import re as _re
     try:
-        r = requests.get(
+        # Fast oEmbed check: catches videos that no longer exist at all
+        oe = requests.get(
             f'https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={key}&format=json',
             timeout=5,
         )
-        return r.status_code == 200
+        if oe.status_code != 200:
+            return False
+        # Deeper check: oEmbed returns 200 even for ERROR-status videos (metadata
+        # stays on YouTube after the video is taken down). Fetch the watch page and
+        # look for playabilityStatus so we fall back to YouTube search in that case.
+        wp = requests.get(
+            f'https://www.youtube.com/watch?v={key}',
+            headers=_YT_HEADERS, timeout=8,
+        )
+        m = _re.search(r'"playabilityStatus"\s*:\s*\{"status"\s*:\s*"([^"]+)"', wp.text)
+        if m and m.group(1) not in ('OK',):
+            logger.debug('yt key %s playabilityStatus=%s — treating as invalid', key, m.group(1))
+            return False
+        return True
     except Exception:
         return True  # assume valid on network error
 
