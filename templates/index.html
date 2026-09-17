@@ -860,11 +860,13 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
   cursor: default;
   transition: opacity 1.2s ease;
 }
-.modal-trailer-overlay-title {
-  color: #fff; font-size: 1.05rem; font-weight: 600;
-  text-align: center; padding: 0 20px;
-  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
-  pointer-events: none;
+.modal-trailer-overlay-logo {
+  height: 90px; width: auto; pointer-events: none;
+  animation: logoGlow 2s ease-in-out infinite alternate;
+}
+@keyframes logoGlow {
+  from { filter: drop-shadow(0 0 6px rgba(255,255,255,0.55)) drop-shadow(0 0 14px rgba(160,210,255,0.35)); }
+  to   { filter: drop-shadow(0 0 22px rgba(255,255,255,0.95)) drop-shadow(0 0 44px rgba(160,210,255,0.65)); }
 }
 
 .modal-unmute-btn {
@@ -1381,7 +1383,7 @@ function _renderModal(title, year, d) {
          src="https://www.youtube.com/embed/${esc(d.trailer_key)}?autoplay=1&controls=0&mute=1&loop=1&playlist=${esc(d.trailer_key)}&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1&enablejsapi=1"
          allow="autoplay; encrypted-media" allowfullscreen></iframe>
        <div class="modal-trailer-overlay" id="trailerOverlay">
-         <span class="modal-trailer-overlay-title">${esc(title)}</span>
+         <img src="/static/Logo_White.png" alt="Eden" class="modal-trailer-overlay-logo">
        </div>
        <button class="modal-unmute-btn" id="unmuteBtn" onclick="toggleMuteTrailer(this)">🔇 Tap for sound</button>`
     : `<div class="modal-trailer-ph">No trailer available</div>`;
