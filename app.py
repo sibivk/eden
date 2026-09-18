@@ -2,6 +2,7 @@ import os
 import re
 import time
 import logging
+import threading
 import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 from flask import Flask, request, jsonify, render_template, Response
@@ -628,6 +629,20 @@ def api_calendar():
         return jsonify({
             'error': str(e), 'movies': [], 'month': month, 'year': year, 'label': label,
         }), 502
+
+
+def _prewarm_calendar():
+    """Pre-populate the calendar cache at startup so the first open is instant."""
+    year = _dt.now().year
+    try:
+        all_movies = _scrape_calendar(year)
+        _cal_cache.update({'data': all_movies, 'at': time.time(), 'year': year})
+        logger.info('Calendar pre-warm done: %d movies', len(all_movies))
+    except Exception as e:
+        logger.warning('Calendar pre-warm failed: %s', e)
+
+# Warm the calendar cache 8 seconds after startup (gives Gunicorn time to bind)
+threading.Timer(8.0, _prewarm_calendar).start()
 
 
 @app.route('/api/library', methods=['GET'])

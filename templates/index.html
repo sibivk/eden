@@ -862,11 +862,17 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 }
 .modal-trailer-overlay-logo {
   height: 90px; width: auto; pointer-events: none;
-  animation: logoGlow 2s ease-in-out infinite alternate;
+  animation: logoHeartbeat 1.2s ease-in-out infinite;
+  transform-origin: center;
 }
-@keyframes logoGlow {
-  from { filter: drop-shadow(0 0 6px rgba(255,255,255,0.55)) drop-shadow(0 0 14px rgba(160,210,255,0.35)); }
-  to   { filter: drop-shadow(0 0 22px rgba(255,255,255,0.95)) drop-shadow(0 0 44px rgba(160,210,255,0.65)); }
+/* Double-beat heartbeat: scale + glow both peak on each beat */
+@keyframes logoHeartbeat {
+  0%   { transform: scale(1);    filter: drop-shadow(0 0 5px rgba(255,255,255,0.45)) drop-shadow(0 0 12px rgba(160,210,255,0.25)); }
+  12%  { transform: scale(1.18); filter: drop-shadow(0 0 26px rgba(255,255,255,1))   drop-shadow(0 0 52px rgba(160,210,255,0.75)); }
+  24%  { transform: scale(1);    filter: drop-shadow(0 0 5px rgba(255,255,255,0.45)) drop-shadow(0 0 12px rgba(160,210,255,0.25)); }
+  36%  { transform: scale(1.10); filter: drop-shadow(0 0 18px rgba(255,255,255,0.85)) drop-shadow(0 0 36px rgba(160,210,255,0.55)); }
+  60%  { transform: scale(1);    filter: drop-shadow(0 0 5px rgba(255,255,255,0.45)) drop-shadow(0 0 12px rgba(160,210,255,0.25)); }
+  100% { transform: scale(1);    filter: drop-shadow(0 0 5px rgba(255,255,255,0.45)) drop-shadow(0 0 12px rgba(160,210,255,0.25)); }
 }
 
 .modal-unmute-btn {
