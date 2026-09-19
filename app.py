@@ -697,6 +697,7 @@ def api_poster():
     poster = backdrop = ''
 
     # ── 1. Try TMDB ──
+    orig_lang = ''
     if TMDB_API_KEY:
         try:
             results = _tmdb_search(title, year or None)
@@ -707,6 +708,7 @@ def api_poster():
                 bp = results[0].get('backdrop_path', '')
                 if pp: poster   = f'https://image.tmdb.org/t/p/w342{pp}'
                 if bp: backdrop = f'https://image.tmdb.org/t/p/w1280{bp}'
+                orig_lang = results[0].get('original_language', '')
         except Exception as e:
             logger.warning('TMDB poster lookup for %s: %s', title, e)
 
@@ -717,8 +719,9 @@ def api_poster():
             poster   = plex_p
             backdrop = plex_b or backdrop
 
-    _poster_cache[cache_key] = {'poster': poster, 'backdrop': backdrop, 'at': time.time()}
-    return jsonify({'poster': poster, 'backdrop': backdrop})
+    _poster_cache[cache_key] = {'poster': poster, 'backdrop': backdrop,
+                                'orig_lang': orig_lang, 'at': time.time()}
+    return jsonify({'poster': poster, 'backdrop': backdrop, 'orig_lang': orig_lang})
 
 
 @app.route('/api/movie-detail', methods=['GET'])

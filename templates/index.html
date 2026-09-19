@@ -294,6 +294,17 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
   padding: 2px 6px; border-radius: 5px;
   backdrop-filter: blur(4px);
 }
+.poster-lang-badge {
+  position: absolute; bottom: 7px; left: 7px;
+  font-size: 0.58rem; font-weight: 700; text-transform: uppercase;
+  background: rgba(0,0,0,0.65); color: rgba(255,255,255,0.8);
+  padding: 2px 6px; border-radius: 5px;
+  backdrop-filter: blur(4px); letter-spacing: 0.04em;
+  transition: color 0.3s, background 0.3s;
+}
+.poster-lang-badge.lang-mismatch {
+  background: rgba(180,80,0,0.75); color: #fff;
+}
 
 .poster-overlay {
   position: absolute; inset: 0;
@@ -1200,6 +1211,7 @@ function posterCardHTML(m, lang) {
           <div class="poster-grad-title">${t}</div>
         </div>
         ${y ? `<div class="poster-year-badge">${y}</div>` : ''}
+        <div class="poster-lang-badge" id="lb-${titleEnc}">${_langLabel(lang)}</div>
         <div class="poster-overlay"></div>
       </div>
       <div class="poster-label">${t}</div>
@@ -1217,6 +1229,21 @@ const posterObserver = new IntersectionObserver((entries) => {
   });
 }, { rootMargin: '300px' });
 
+// Map TMDB ISO 639-1 codes → short display labels
+const _LANG_LABELS = {
+  ml: 'Malayalam', hi: 'Hindi', ta: 'Tamil', en: 'English',
+  te: 'Telugu', kn: 'Kannada', bn: 'Bengali', mr: 'Marathi',
+  ko: 'Korean',  ja: 'Japanese', zh: 'Chinese', fr: 'French',
+  es: 'Spanish', de: 'German',  pt: 'Portuguese',
+};
+// Library-lang name → TMDB code (for mismatch detection)
+const _LANG_CODE = { malayalam: 'ml', hindi: 'hi', tamil: 'ta', english: 'en' };
+
+function _langLabel(lang) {
+  const abbr = { malayalam: 'Mal', hindi: 'Hindi', tamil: 'Tamil', english: 'Eng' };
+  return abbr[lang] || lang || '';
+}
+
 function fetchPoster(card) {
   const title = card.dataset.title;
   const year  = card.dataset.year || '';
@@ -1225,6 +1252,17 @@ function fetchPoster(card) {
   fetch(`/api/poster?title=${encodeURIComponent(title)}&year=${encodeURIComponent(year)}&lang=${encodeURIComponent(lang)}`)
     .then(r => r.json())
     .then(data => {
+      // Update language badge with TMDB original_language
+      const badge = document.getElementById('lb-' + encodeURIComponent(title));
+      if (badge && data.orig_lang) {
+        const label = _LANG_LABELS[data.orig_lang] || data.orig_lang.toUpperCase();
+        badge.textContent = label;
+        const expectedCode = _LANG_CODE[lang] || '';
+        if (expectedCode && data.orig_lang !== expectedCode) {
+          badge.classList.add('lang-mismatch');
+          badge.title = `Originally ${label} — in ${lang} library`;
+        }
+      }
       if (!data.poster) return;
       const wrap = card.querySelector('.poster-img-wrap');
       if (!wrap) return;
