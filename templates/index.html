@@ -1654,6 +1654,20 @@ async function loadActivity() {
     }
     el.innerHTML = items.map(a => {
       if (a.type === 'job_run') return renderJobRun(a);
+      if (a.type === 'lang_skip') {
+        const at = a.at ? new Date(a.at + 'Z').toLocaleString() : '';
+        return `<div class="activity-item">
+          <span class="activity-icon">🚫</span>
+          <div class="activity-body">
+            <div class="activity-title" style="color:var(--warn)">${esc(a.title || '—')}${a.year ? ` (${a.year})` : ''}</div>
+            <div class="activity-meta">
+              Skipped — TMDB says <strong>${esc(a.tmdb_lang || '?')}</strong>, source claimed
+              <span style="color:${langColors[a.language]||'var(--muted)'};font-weight:600">${esc(a.language||'')}</span>,
+              no dub hint in NZBs · ${at}
+            </div>
+          </div>
+        </div>`;
+      }
       const icons = { queued: '⬇️', moved: '📁', error: '❌' };
       const icon  = icons[a.type] || '📌';
       const lang  = a.language || '';

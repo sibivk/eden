@@ -319,15 +319,10 @@ def _in_library(title: str) -> bool:
     return False
 
 
-def _tmdb_lang_ok(title: str, year, source_lang: str) -> bool:
-    """Return False when TMDB identifies the movie as a non-target language.
-
-    Protects against dubbed releases being listed under the wrong language on
-    OTT sites (e.g. a Telugu movie appearing in Einthusan's Malayalam section).
-    Returns True when TMDB has no record of the movie (don't block unknowns).
-    """
+def _tmdb_get_orig_lang(title: str, year) -> str:
+    """Return TMDB original_language code (e.g. 'ml', 'te', 'hi'), or '' if unknown."""
     if not TMDB_API_KEY:
-        return True
+        return ''
     try:
         params = {'api_key': TMDB_API_KEY, 'query': title, 'language': 'en-US', 'page': 1}
         if year:
@@ -339,16 +334,18 @@ def _tmdb_lang_ok(title: str, year, source_lang: str) -> bool:
             params.pop('primary_release_year')
             r = requests.get('https://api.themoviedb.org/3/search/movie', params=params, timeout=8)
             results = r.json().get('results', [])
-        if not results:
-            return True  # unknown movie — trust the source
-        orig = results[0].get('original_language', '')
-        if orig in _NON_TARGET_LANG_CODES:
-            logger.info('TMDB lang check: "%s" is %s (source: %s) — skipping', title, orig, source_lang)
-            return False
-        return True
+        return results[0].get('original_language', '') if results else ''
     except Exception as e:
-        logger.warning('TMDB lang check failed for "%s": %s', title, e)
-        return True  # on error, trust the source
+        logger.warning('TMDB lang lookup failed for "%s": %s', title, e)
+        return ''
+
+
+# Regex that flags NZB titles hinting at a multi-language / dubbed release.
+# If matched, we download even when TMDB reports a non-target original language.
+_DUB_HINT_RE = re.compile(
+    r'\b(malayalam|mal|tamil|tam|hindi|hin|multi(?:[-. ]?(?:lang(?:ual)?|audio))?|dual[-. ]?audio)\b',
+    re.IGNORECASE,
+)
 
 
 # ── OTT scraper ───────────────────────────────────────────────────────────────
@@ -595,16 +592,30 @@ def auto_download_job():
             skipped_exists += 1
             continue
 
-        # Cross-check original language with TMDB to filter dubbed non-target movies
-        if not _tmdb_lang_ok(title, year, lang):
-            skipped_exists += 1
-            continue
-
         results = search_1080p(title)
         if not results:
             logger.info('No 1080p NZB (1–10 GB) found for: %s', title)
             skipped_no_nzb += 1
             continue
+
+        # Cross-check TMDB original language AFTER getting NZB results so we
+        # can scan NZB titles for dub hints (e.g. "Malayalam", "Multi Audio").
+        tmdb_lang = _tmdb_get_orig_lang(title, year)
+        if tmdb_lang and tmdb_lang in _NON_TARGET_LANG_CODES:
+            nzb_titles_str = ' '.join(r.get('title', '') for r in results)
+            if _DUB_HINT_RE.search(nzb_titles_str):
+                logger.info('"%s" is TMDB:%s but NZB hints dub — downloading', title, tmdb_lang)
+            else:
+                detail = (f'TMDB original language is {tmdb_lang} '
+                          f'(source listed as {lang}) — no dub hint in NZBs')
+                logger.info('Skipping "%s": %s', title, detail)
+                with _db_lock:
+                    db = _load_db()
+                    _log_activity(db, 'lang_skip', title=title, year=year,
+                                  language=lang, tmdb_lang=tmdb_lang, detail=detail)
+                    _save_db(db)
+                skipped_exists += 1
+                continue
 
         best = results[0]  # smallest above 1 GB
         nzb_title = best['title']
