@@ -43,6 +43,7 @@ NZBS_BASE_URL = 'https://nzbs.in/api'
 NZBGET_URL    = os.getenv('NZBGET_URL', '')
 NZBGET_USER   = os.getenv('NZBGET_USERNAME', '')
 NZBGET_PASS   = os.getenv('NZBGET_PASSWORD', '')
+TMDB_API_KEY  = os.getenv('TMDB_API_KEY', '')
 NZB_CATEGORY  = os.getenv('NZB_CATEGORY', 'Evaluate')
 
 MIN_SIZE_BYTES = 1 * 1024 ** 3   # 1 GB minimum
@@ -50,6 +51,13 @@ MAX_SIZE_BYTES = 10 * 1024 ** 3  # 10 GB cap
 NEWZNAB_NS     = '{http://www.newznab.com/DTD/2010/feeds/attributes/}'
 TARGET_LANGS   = {'malayalam', 'hindi', 'tamil'}
 PROTECTED_DIRS = {'preroll', 'temp'}   # compared case-insensitively
+
+# TMDB original_language codes that are NOT our target languages.
+# Movies identified as these are rejected even if the source site
+# lists them under malayalam/hindi/tamil (e.g. dubbed releases).
+_NON_TARGET_LANG_CODES = {'te', 'kn', 'bn', 'mr', 'gu', 'pa', 'ur', 'or', 'as'}
+# te=Telugu, kn=Kannada, bn=Bengali, mr=Marathi, gu=Gujarati
+# pa=Punjabi, ur=Urdu, or=Odia, as=Assamese
 OTT_URL        = 'https://www.ottmovierelease.com'
 EINTHUSAN_URL  = 'https://einthusan.tv/movie/results/?find=Recent&lang={lang}&page=1'
 
@@ -311,6 +319,38 @@ def _in_library(title: str) -> bool:
     return False
 
 
+def _tmdb_lang_ok(title: str, year, source_lang: str) -> bool:
+    """Return False when TMDB identifies the movie as a non-target language.
+
+    Protects against dubbed releases being listed under the wrong language on
+    OTT sites (e.g. a Telugu movie appearing in Einthusan's Malayalam section).
+    Returns True when TMDB has no record of the movie (don't block unknowns).
+    """
+    if not TMDB_API_KEY:
+        return True
+    try:
+        params = {'api_key': TMDB_API_KEY, 'query': title, 'language': 'en-US', 'page': 1}
+        if year:
+            params['primary_release_year'] = year
+        r = requests.get('https://api.themoviedb.org/3/search/movie', params=params, timeout=8)
+        r.raise_for_status()
+        results = r.json().get('results', [])
+        if not results and year:
+            params.pop('primary_release_year')
+            r = requests.get('https://api.themoviedb.org/3/search/movie', params=params, timeout=8)
+            results = r.json().get('results', [])
+        if not results:
+            return True  # unknown movie — trust the source
+        orig = results[0].get('original_language', '')
+        if orig in _NON_TARGET_LANG_CODES:
+            logger.info('TMDB lang check: "%s" is %s (source: %s) — skipping', title, orig, source_lang)
+            return False
+        return True
+    except Exception as e:
+        logger.warning('TMDB lang check failed for "%s": %s', title, e)
+        return True  # on error, trust the source
+
+
 # ── OTT scraper ───────────────────────────────────────────────────────────────
 
 def scrape_ott_movies() -> list:
@@ -552,6 +592,11 @@ def auto_download_job():
 
         if _in_library(title):
             logger.info('Already in library: %s', title)
+            skipped_exists += 1
+            continue
+
+        # Cross-check original language with TMDB to filter dubbed non-target movies
+        if not _tmdb_lang_ok(title, year, lang):
             skipped_exists += 1
             continue
 
