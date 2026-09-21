@@ -319,25 +319,37 @@ def _in_library(title: str) -> bool:
     return False
 
 
-def _tmdb_get_orig_lang(title: str, year) -> str:
-    """Return TMDB original_language code (e.g. 'ml', 'te', 'hi'), or '' if unknown."""
+def _tmdb_get_info(title: str, year) -> tuple:
+    """
+    Return (original_language, is_tv_show) from TMDB using /search/multi.
+    is_tv_show is True when TMDB finds only TV series results (no movie match).
+    Returns ('', False) on failure or when title is not found.
+    """
     if not TMDB_API_KEY:
-        return ''
+        return '', False
     try:
         params = {'api_key': TMDB_API_KEY, 'query': title, 'language': 'en-US', 'page': 1}
         if year:
-            params['primary_release_year'] = year
-        r = requests.get('https://api.themoviedb.org/3/search/movie', params=params, timeout=8)
+            params['year'] = year
+        r = requests.get('https://api.themoviedb.org/3/search/multi', params=params, timeout=8)
         r.raise_for_status()
         results = r.json().get('results', [])
         if not results and year:
-            params.pop('primary_release_year')
-            r = requests.get('https://api.themoviedb.org/3/search/movie', params=params, timeout=8)
+            params.pop('year')
+            r = requests.get('https://api.themoviedb.org/3/search/multi', params=params, timeout=8)
+            r.raise_for_status()
             results = r.json().get('results', [])
-        return results[0].get('original_language', '') if results else ''
+        media = [x for x in results if x.get('media_type') in ('movie', 'tv')]
+        if not media:
+            return '', False
+        movies = [x for x in media if x.get('media_type') == 'movie']
+        if movies:
+            return movies[0].get('original_language', ''), False
+        # Only TV results found — this title is a series, not a movie
+        return '', True
     except Exception as e:
-        logger.warning('TMDB lang lookup failed for "%s": %s', title, e)
-        return ''
+        logger.warning('TMDB info lookup failed for "%s": %s', title, e)
+        return '', False
 
 
 # Regex that flags NZB titles hinting at a multi-language / dubbed release.
@@ -598,9 +610,20 @@ def auto_download_job():
             skipped_no_nzb += 1
             continue
 
-        # Cross-check TMDB original language AFTER getting NZB results so we
-        # can scan NZB titles for dub hints (e.g. "Malayalam", "Multi Audio").
-        tmdb_lang = _tmdb_get_orig_lang(title, year)
+        # Cross-check TMDB AFTER getting NZB results so we can scan NZB titles
+        # for dub hints and also detect TV series before downloading.
+        tmdb_lang, is_tv = _tmdb_get_info(title, year)
+        if is_tv:
+            detail = 'TMDB identifies this as a TV series, not a movie'
+            logger.info('Skipping "%s": %s', title, detail)
+            with _db_lock:
+                db = _load_db()
+                _log_activity(db, 'tv_skip', title=title, year=year,
+                              language=lang, detail=detail)
+                _save_db(db)
+            skipped_exists += 1
+            continue
+
         if tmdb_lang and tmdb_lang in _NON_TARGET_LANG_CODES:
             nzb_titles_str = ' '.join(r.get('title', '') for r in results)
             if _DUB_HINT_RE.search(nzb_titles_str):

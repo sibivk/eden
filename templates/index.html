@@ -1706,6 +1706,18 @@ async function loadActivity() {
           </div>
         </div>`;
       }
+      if (a.type === 'tv_skip') {
+        const at = a.at ? new Date(a.at + 'Z').toLocaleString() : '';
+        return `<div class="activity-item">
+          <span class="activity-icon">📺</span>
+          <div class="activity-body">
+            <div class="activity-title" style="color:var(--warn)">${esc(a.title || '—')}${a.year ? ` (${a.year})` : ''}</div>
+            <div class="activity-meta">
+              Skipped — TMDB identifies this as a <strong>TV series</strong>, not a movie · ${at}
+            </div>
+          </div>
+        </div>`;
+      }
       const icons = { queued: '⬇️', moved: '📁', error: '❌' };
       const icon  = icons[a.type] || '📌';
       const lang  = a.language || '';
