@@ -492,7 +492,9 @@ _CAL_DATE_RE = re.compile(
     re.IGNORECASE,
 )
 _cal_cache: dict = {'data': None, 'at': 0.0, 'year': 0}
-CAL_CACHE_TTL = 3 * 3600  # 3 hours
+CAL_CACHE_TTL = 6 * 3600  # 6 hours
+_cal_bg_running = False
+_cal_bg_lock = threading.Lock()
 
 _LANG_CODE_MAP = {
     'hi': 'Hindi', 'ml': 'Malayalam', 'ta': 'Tamil', 'te': 'Telugu',
@@ -608,17 +610,40 @@ def _scrape_calendar(year: int) -> list:
     return movies
 
 
+def _refresh_calendar_bg():
+    global _cal_bg_running
+    year = _dt.now().year
+    try:
+        all_movies = _scrape_calendar(year)
+        _cal_cache.update({'data': all_movies, 'at': time.time(), 'year': year})
+        logger.info('Calendar background refresh done: %d movies', len(all_movies))
+    except Exception as e:
+        logger.warning('Calendar background refresh failed: %s', e)
+    finally:
+        _cal_bg_running = False
+
+
 @app.route('/api/calendar', methods=['GET'])
 def api_calendar():
+    global _cal_bg_running
     now = _dt.now()
     year, month = now.year, now.month
     label = now.strftime('%B %Y')
 
-    if (_cal_cache['data'] is not None and _cal_cache['year'] == year and
-            time.time() - _cal_cache['at'] < CAL_CACHE_TTL):
+    has_data = _cal_cache['data'] is not None and _cal_cache['year'] == year
+    is_fresh  = has_data and time.time() - _cal_cache['at'] < CAL_CACHE_TTL
+
+    if has_data:
+        # Return stale-or-fresh data immediately; kick off background refresh if stale
+        if not is_fresh:
+            with _cal_bg_lock:
+                if not _cal_bg_running:
+                    _cal_bg_running = True
+                    threading.Thread(target=_refresh_calendar_bg, daemon=True).start()
         movies = [m for m in _cal_cache['data'] if m['month'] == month]
         return jsonify({'movies': movies, 'month': month, 'year': year, 'label': label})
 
+    # Cold start — no data at all; scrape synchronously
     try:
         all_movies = _scrape_calendar(year)
         _cal_cache.update({'data': all_movies, 'at': time.time(), 'year': year})
