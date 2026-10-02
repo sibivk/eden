@@ -804,12 +804,19 @@ def process_completed_files():
                      else movie_title.replace(' ', '.')
         dest = dest_dir / f'{clean_stem}{ext}'
 
+        # Determine source folder BEFORE any move/cleanup (path may be gone after)
+        src_folder = src.parent if src.is_file() else src
+
         if dest.exists():
             logger.info('Already at destination, skipping: %s', dest)
+            # Still clean up the source folder so it doesn't linger in Evaluate
+            if src_folder != STORAGE_MOUNT and src_folder.name.lower() not in PROTECTED_DIRS:
+                try:
+                    shutil.rmtree(str(src_folder))
+                    logger.info('Cleaned up duplicate source folder: %s', src_folder.name)
+                except Exception as rm_err:
+                    logger.warning('Could not remove duplicate folder %s: %s', src_folder, rm_err)
             continue
-
-        # Determine source folder BEFORE the move (path is gone after)
-        src_folder = src.parent if src.is_file() else src
 
         try:
             shutil.move(str(src), str(dest))
