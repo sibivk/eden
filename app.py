@@ -34,6 +34,8 @@ NZB_SEARCH_KEY = os.getenv("NZB_SEARCH_KEY", "") or os.getenv("NZBS_API_KEY", ""
 NZB_SEARCH_URL = os.getenv("NZB_SEARCH_URL", "")
 NZB_SEARCH_KEY2 = os.getenv("NZB_SEARCH_KEY2", "")
 NZB_SEARCH_URL2 = os.getenv("NZB_SEARCH_URL2", "")
+NZB_SEARCH_KEY3 = os.getenv("NZB_SEARCH_KEY3", "")
+NZB_SEARCH_URL3 = os.getenv("NZB_SEARCH_URL3", "")
 NZBGET_URL = os.getenv("NZBGET_URL", "http://localhost:6789")
 NZBGET_USER = os.getenv("NZBGET_USERNAME", "nzbget")
 NZBGET_PASS = os.getenv("NZBGET_PASSWORD", "")
@@ -114,6 +116,52 @@ def home():
     return render_template("index.html")
 
 
+def _search_one_indexer(query, base_url, api_key, label):
+    """Query one Newznab indexer and return parsed result list."""
+    params = {"t": "movie", "apikey": api_key, "q": query, "extended": 1}
+    headers = {"User-Agent": "EdenMediaManager/1.0"}
+    try:
+        resp = requests.get(base_url, params=params, headers=headers, timeout=15)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+    except Exception as e:
+        logger.warning("UI search [%s] error for '%s': %s", label, query, e)
+        return []
+
+    items = []
+    for item in root.findall(".//item"):
+        title = item.findtext("title") or ""
+        link  = item.findtext("link") or ""
+        size = grabs = imdb_votes = 0
+        imdb_rating = None
+        for attr in item.findall(f"{NEWZNAB_NS}attr"):
+            name  = attr.attrib.get("name", "")
+            value = attr.attrib.get("value", "")
+            if name == "size":
+                size = int(value) if value.isdigit() else 0
+            elif name == "grabs":
+                grabs = int(value) if value.isdigit() else 0
+            elif name == "imdb_rating":
+                try: imdb_rating = float(value)
+                except ValueError: pass
+            elif name == "imdb_votes":
+                try: imdb_votes = int(value)
+                except ValueError: pass
+        if size == 0:
+            enc = item.find("enclosure")
+            if enc is not None:
+                length = enc.attrib.get("length", "0")
+                size = int(length) if length.isdigit() else 0
+        items.append({
+            "title": title, "download_url": link,
+            "size_bytes": size, "grabs": grabs,
+            "imdb_rating": imdb_rating, "imdb_votes": imdb_votes,
+            "quality": _parse_quality(title),
+        })
+    logger.info("UI search [%s] '%s' → %d results", label, query, len(items))
+    return items
+
+
 @app.route("/api/search", methods=["GET"])
 def search_nzb():
     query = request.args.get("q", "").strip()
@@ -124,85 +172,30 @@ def search_nzb():
     if not NZB_SEARCH_KEY or not NZB_SEARCH_URL:
         return jsonify({"error": "NZB indexer is not configured in .env"}), 500
 
-    params = {"t": "movie", "apikey": NZB_SEARCH_KEY, "q": query, "extended": 1}
-    headers = {"User-Agent": "EdenMediaManager/1.0"}
+    indexers = [("NZBGeek", NZB_SEARCH_URL, NZB_SEARCH_KEY)]
+    if NZB_SEARCH_URL2 and NZB_SEARCH_KEY2:
+        indexers.append(("NZBFinder", NZB_SEARCH_URL2, NZB_SEARCH_KEY2))
+    if NZB_SEARCH_URL3 and NZB_SEARCH_KEY3:
+        indexers.append(("nzbs.in", NZB_SEARCH_URL3, NZB_SEARCH_KEY3))
 
-    try:
-        resp = requests.get(NZB_SEARCH_URL, params=params, headers=headers, timeout=15)
-        resp.raise_for_status()
-        root = ET.fromstring(resp.text)
-        results = []
+    seen_titles = set()
+    results = []
+    for label, url, key in indexers:
+        for r in _search_one_indexer(query, url, key, label):
+            if r["title"] not in seen_titles:
+                seen_titles.add(r["title"])
+                results.append(r)
 
-        for item in root.findall(".//item"):
-            title = item.findtext("title") or ""
-            link = item.findtext("link") or ""
+    def _sort_key(r):
+        res = r["quality"]["resolution"]
+        prio = {"1080p": 0, "4K": 1}.get(res, 3)
+        if prio == 3 and r["quality"]["is_hevc"] and r["quality"]["has_5_1"]:
+            prio = 2
+        return (prio, -(r["imdb_rating"] or 0), -r["imdb_votes"])
 
-            size = 0
-            grabs = 0
-            imdb_rating = None
-            imdb_votes = 0
-
-            for attr in item.findall(f"{NEWZNAB_NS}attr"):
-                name = attr.attrib.get("name", "")
-                value = attr.attrib.get("value", "")
-                if name == "size":
-                    size = int(value) if value.isdigit() else 0
-                elif name == "grabs":
-                    grabs = int(value) if value.isdigit() else 0
-                elif name == "imdb_rating":
-                    try:
-                        imdb_rating = float(value)
-                    except ValueError:
-                        pass
-                elif name == "imdb_votes":
-                    try:
-                        imdb_votes = int(value)
-                    except ValueError:
-                        pass
-
-            # Fall back to enclosure length if newznab:attr size is missing
-            if size == 0:
-                enc = item.find("enclosure")
-                if enc is not None:
-                    length = enc.attrib.get("length", "0")
-                    size = int(length) if length.isdigit() else 0
-
-            q = _parse_quality(title)
-            results.append({
-                "title": title,
-                "download_url": link,
-                "size_bytes": size,
-                "grabs": grabs,
-                "imdb_rating": imdb_rating,
-                "imdb_votes": imdb_votes,
-                "quality": q,
-            })
-
-        def _sort_key(r):
-            res = r["quality"]["resolution"]
-            if res == "1080p":
-                prio = 0
-            elif res == "4K":
-                prio = 1
-            elif r["quality"]["is_hevc"] and r["quality"]["has_5_1"]:
-                prio = 2
-            else:
-                prio = 3
-            return (prio, -(r["imdb_rating"] or 0), -r["imdb_votes"])
-
-        results.sort(key=_sort_key)
-        logger.info("Search '%s' → %d results (after %dGB filter)", query, len(results), MAX_SIZE_BYTES // 1024 ** 3)
-        return jsonify({"results": results})
-
-    except requests.Timeout:
-        logger.error("Timeout searching NZB indexer for '%s'", query)
-        return jsonify({"error": "Search timed out — try again"}), 504
-    except ET.ParseError as e:
-        logger.error("XML parse error: %s", e)
-        return jsonify({"error": "Unexpected response from indexer"}), 502
-    except Exception as e:
-        logger.error("Search error: %s", e)
-        return jsonify({"error": f"Search failed: {str(e)}"}), 500
+    results.sort(key=_sort_key)
+    logger.info("UI search '%s' → %d total results across %d indexers", query, len(results), len(indexers))
+    return jsonify({"results": results})
 
 
 VALID_LANGUAGES = {"malayalam", "hindi", "tamil", "english"}
