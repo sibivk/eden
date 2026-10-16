@@ -42,6 +42,8 @@ NZB_SEARCH_KEY = os.getenv('NZB_SEARCH_KEY', '') or os.getenv('NZBS_API_KEY', ''
 NZB_SEARCH_URL = os.getenv('NZB_SEARCH_URL', '')
 NZB_SEARCH_KEY2 = os.getenv('NZB_SEARCH_KEY2', '')
 NZB_SEARCH_URL2 = os.getenv('NZB_SEARCH_URL2', '')
+NZB_SEARCH_KEY3 = os.getenv('NZB_SEARCH_KEY3', '')
+NZB_SEARCH_URL3 = os.getenv('NZB_SEARCH_URL3', '')
 NZBGET_URL    = os.getenv('NZBGET_URL', '')
 NZBGET_USER   = os.getenv('NZBGET_USERNAME', '')
 NZBGET_PASS   = os.getenv('NZBGET_PASSWORD', '')
@@ -517,7 +519,9 @@ def search_1080p(title: str) -> list:
 
     indexers = [('NZBGeek', NZB_SEARCH_URL, NZB_SEARCH_KEY)]
     if NZB_SEARCH_URL2 and NZB_SEARCH_KEY2:
-        indexers.append(('Backup', NZB_SEARCH_URL2, NZB_SEARCH_KEY2))
+        indexers.append(('NZBFinder', NZB_SEARCH_URL2, NZB_SEARCH_KEY2))
+    if NZB_SEARCH_URL3 and NZB_SEARCH_KEY3:
+        indexers.append(('nzbs.in', NZB_SEARCH_URL3, NZB_SEARCH_KEY3))
 
     merged = {'1080': [], 'hevc51': [], '4k': []}
     for label, url, key in indexers:
