@@ -1,7 +1,7 @@
 """
 Eden Scheduler
 
-Daily 10AM  — scrape ottmovierelease.com → search nzbs.in → queue to NZBGet
+Daily 10AM  — scrape ottmovierelease.com → search NZB indexer → queue to NZBGet
 Every 5 min — read .eden_ready.log → move completed files to language libraries
 """
 
@@ -38,8 +38,8 @@ LIBRARY_PATHS = {
 }
 
 # ── Config ────────────────────────────────────────────────────────────────────
-NZBS_API_KEY  = os.getenv('NZBS_API_KEY', '')
-NZBS_BASE_URL = 'https://nzbs.in/api'
+NZB_SEARCH_KEY = os.getenv('NZB_SEARCH_KEY', '') or os.getenv('NZBS_API_KEY', '')
+NZB_SEARCH_URL = os.getenv('NZB_SEARCH_URL', '')
 NZBGET_URL    = os.getenv('NZBGET_URL', '')
 NZBGET_USER   = os.getenv('NZBGET_USERNAME', '')
 NZBGET_PASS   = os.getenv('NZBGET_PASSWORD', '')
@@ -456,27 +456,30 @@ def scrape_einthusan() -> list:
     return movies
 
 
-# ── nzbs.in search ────────────────────────────────────────────────────────────
+# ── NZB indexer search ────────────────────────────────────────────────────────
 
 def search_1080p(title: str) -> list:
     """
-    Search nzbs.in for the best available release:
+    Search the configured Newznab indexer for the best available release:
     1. 1080p (preferred)
     2. HEVC + 5.1 audio (acceptable fallback when no 1080p exists)
     3. 4K/UHD (last resort if within size limit)
     All results are title-verified and filtered to 1 GB–10 GB, sorted smallest-first.
     """
-    if not NZBS_API_KEY:
-        logger.warning('NZBS_API_KEY not set — skipping search')
+    if not NZB_SEARCH_KEY:
+        logger.warning('NZB_SEARCH_KEY not set — skipping search')
+        return []
+    if not NZB_SEARCH_URL:
+        logger.warning('NZB_SEARCH_URL not set — skipping search')
         return []
 
-    params = {'t': 'movie', 'apikey': NZBS_API_KEY, 'q': title, 'extended': 1}
+    params = {'t': 'movie', 'apikey': NZB_SEARCH_KEY, 'q': title, 'extended': 1}
     try:
-        resp = requests.get(NZBS_BASE_URL, params=params, timeout=15)
+        resp = requests.get(NZB_SEARCH_URL, params=params, timeout=15)
         resp.raise_for_status()
         root = ET.fromstring(resp.text)
     except Exception as e:
-        logger.error('nzbs.in search error for "%s": %s', title, e)
+        logger.error('NZB indexer search error for "%s": %s', title, e)
         return []
 
     results_1080    = []
