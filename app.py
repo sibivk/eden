@@ -166,9 +166,6 @@ def search_nzb():
                     length = enc.attrib.get("length", "0")
                     size = int(length) if length.isdigit() else 0
 
-            if size > MAX_SIZE_BYTES:
-                continue
-
             q = _parse_quality(title)
             results.append({
                 "title": title,

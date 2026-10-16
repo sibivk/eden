@@ -49,7 +49,7 @@ TMDB_API_KEY  = os.getenv('TMDB_API_KEY', '')
 NZB_CATEGORY  = os.getenv('NZB_CATEGORY', 'Evaluate')
 
 MIN_SIZE_BYTES = 1 * 1024 ** 3
-MAX_SIZE_BYTES = int(os.getenv('MAX_SIZE_GB', '15')) * 1024 ** 3
+MAX_SIZE_BYTES = int(os.getenv('MAX_SIZE_GB', '10')) * 1024 ** 3
 NEWZNAB_NS     = '{http://www.newznab.com/DTD/2010/feeds/attributes/}'
 TARGET_LANGS   = {'malayalam', 'hindi', 'tamil'}
 PROTECTED_DIRS = {'preroll', 'temp'}   # compared case-insensitively
