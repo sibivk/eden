@@ -30,8 +30,10 @@ try:
 except Exception as _sched_err:
     logger.error("Scheduler failed to start: %s", _sched_err)
 
-NZBS_API_KEY = os.getenv("NZBS_API_KEY", "")
-NZBS_BASE_URL = "https://nzbs.in/api"
+NZB_SEARCH_KEY = os.getenv("NZB_SEARCH_KEY", "") or os.getenv("NZBS_API_KEY", "")
+NZB_SEARCH_URL = os.getenv("NZB_SEARCH_URL", "")
+NZB_SEARCH_KEY2 = os.getenv("NZB_SEARCH_KEY2", "")
+NZB_SEARCH_URL2 = os.getenv("NZB_SEARCH_URL2", "")
 NZBGET_URL = os.getenv("NZBGET_URL", "http://localhost:6789")
 NZBGET_USER = os.getenv("NZBGET_USERNAME", "nzbget")
 NZBGET_PASS = os.getenv("NZBGET_PASSWORD", "")
@@ -119,13 +121,13 @@ def search_nzb():
         return jsonify({"error": "Query parameter 'q' is required"}), 400
     if len(query) > 200:
         return jsonify({"error": "Query too long"}), 400
-    if not NZBS_API_KEY or NZBS_API_KEY == "your_nzbs_in_api_key_here":
-        return jsonify({"error": "NZBS_API_KEY is not configured in .env"}), 500
+    if not NZB_SEARCH_KEY or not NZB_SEARCH_URL:
+        return jsonify({"error": "NZB indexer is not configured in .env"}), 500
 
-    params = {"t": "movie", "apikey": NZBS_API_KEY, "q": query, "extended": 1}
+    params = {"t": "movie", "apikey": NZB_SEARCH_KEY, "q": query, "extended": 1}
 
     try:
-        resp = requests.get(NZBS_BASE_URL, params=params, timeout=15)
+        resp = requests.get(NZB_SEARCH_URL, params=params, timeout=15)
         resp.raise_for_status()
         root = ET.fromstring(resp.text)
         results = []
@@ -195,11 +197,11 @@ def search_nzb():
         return jsonify({"results": results})
 
     except requests.Timeout:
-        logger.error("Timeout searching nzbs.in for '%s'", query)
+        logger.error("Timeout searching NZB indexer for '%s'", query)
         return jsonify({"error": "Search timed out — try again"}), 504
     except ET.ParseError as e:
         logger.error("XML parse error: %s", e)
-        return jsonify({"error": "Unexpected response from nzbs.in"}), 502
+        return jsonify({"error": "Unexpected response from indexer"}), 502
     except Exception as e:
         logger.error("Search error: %s", e)
         return jsonify({"error": f"Search failed: {str(e)}"}), 500
