@@ -620,6 +620,10 @@ def auto_download_job():
         if not results:
             logger.info('No 1080p NZB (1–10 GB) found for: %s', title)
             skipped_no_nzb += 1
+            with _db_lock:
+                db = _load_db()
+                _log_activity(db, 'no_nzb', title=title, year=year, language=lang)
+                _save_db(db)
             continue
 
         # Cross-check TMDB AFTER getting NZB results so we can scan NZB titles
@@ -854,6 +858,53 @@ def process_completed_files():
         logger.info('File mover: moved %d file(s)', moved_count)
 
 
+# ── Midnight no-NZB report ────────────────────────────────────────────────────
+
+def _send_no_nzb_report():
+    """Send one Pushover notification listing every movie with no NZB in the last 25 hours."""
+    if not PUSHOVER_TOKEN or not PUSHOVER_USER:
+        return
+    cutoff = (datetime.utcnow().timestamp() - 25 * 3600)
+    with _db_lock:
+        db = _load_db()
+    missing = []
+    for entry in db.get('activity', []):
+        if entry.get('type') != 'no_nzb':
+            continue
+        try:
+            at = datetime.fromisoformat(entry['at']).timestamp()
+        except Exception:
+            continue
+        if at >= cutoff:
+            title = entry.get('title', '?')
+            year  = entry.get('year', '')
+            lang  = entry.get('language', '')
+            missing.append(f"{title}{' (' + year + ')' if year else ''} [{lang}]")
+    if not missing:
+        logger.info('No-NZB report: nothing to report')
+        return
+    body = '\n'.join(missing[:30])
+    if len(missing) > 30:
+        body += f'\n…and {len(missing) - 30} more'
+    try:
+        r = requests.post(
+            'https://api.pushover.net/1/messages.json',
+            data={
+                'token':   PUSHOVER_TOKEN,
+                'user':    PUSHOVER_USER,
+                'title':   f'EDEN — No NZB Found ({len(missing)} movies)',
+                'message': body,
+            },
+            timeout=8,
+        )
+        if r.status_code != 200:
+            logger.warning('Pushover (no-NZB report) returned %d', r.status_code)
+        else:
+            logger.info('No-NZB report sent: %d movies', len(missing))
+    except Exception as e:
+        logger.warning('No-NZB report notification failed: %s', e)
+
+
 # ── Scheduler init ────────────────────────────────────────────────────────────
 
 def start_scheduler():
@@ -865,8 +916,9 @@ def start_scheduler():
     _scheduler = BackgroundScheduler(timezone='UTC')
     _scheduler.add_job(auto_download_job,      'cron',     hour=10, minute=0, id='auto_dl')
     _scheduler.add_job(process_completed_files, 'interval', minutes=5,         id='file_mover')
+    _scheduler.add_job(_send_no_nzb_report,    'cron',     hour=0,  minute=0, id='no_nzb_report')
     _scheduler.start()
-    logger.info('Scheduler started — auto-download at 10:00 UTC, file check every 5 min')
+    logger.info('Scheduler started — auto-download 10:00 UTC, file check 5 min, no-NZB report 00:00 UTC')
 
 
 def trigger_now():

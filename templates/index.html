@@ -1719,6 +1719,19 @@ async function loadActivity() {
           </div>
         </div>`;
       }
+      if (a.type === 'no_nzb') {
+        const at = a.at ? new Date(a.at + 'Z').toLocaleString() : '';
+        const lc = langColors[a.language] || 'var(--muted)';
+        return `<div class="activity-item">
+          <span class="activity-icon">🔍</span>
+          <div class="activity-body">
+            <div class="activity-title" style="color:var(--muted)">${esc(a.title || '—')}${a.year ? ` (${a.year})` : ''}</div>
+            <div class="activity-meta">
+              No NZB found${a.language ? ` · <span style="color:${lc};font-weight:600">${esc(a.language)}</span>` : ''} · ${at}
+            </div>
+          </div>
+        </div>`;
+      }
       const icons = { queued: '⬇️', moved: '📁', error: '❌' };
       const icon  = icons[a.type] || '📌';
       const lang  = a.language || '';
