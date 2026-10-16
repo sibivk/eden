@@ -48,8 +48,8 @@ NZBGET_PASS   = os.getenv('NZBGET_PASSWORD', '')
 TMDB_API_KEY  = os.getenv('TMDB_API_KEY', '')
 NZB_CATEGORY  = os.getenv('NZB_CATEGORY', 'Evaluate')
 
-MIN_SIZE_BYTES = 1 * 1024 ** 3   # 1 GB minimum
-MAX_SIZE_BYTES = 10 * 1024 ** 3  # 10 GB cap
+MIN_SIZE_BYTES = 1 * 1024 ** 3
+MAX_SIZE_BYTES = int(os.getenv('MAX_SIZE_GB', '15')) * 1024 ** 3
 NEWZNAB_NS     = '{http://www.newznab.com/DTD/2010/feeds/attributes/}'
 TARGET_LANGS   = {'malayalam', 'hindi', 'tamil'}
 PROTECTED_DIRS = {'preroll', 'temp'}   # compared case-insensitively
@@ -106,7 +106,7 @@ def _fuzzy_match(title: str, candidate: str) -> bool:
     if norm_title == norm_cand:
         return True
     shorter, longer = (norm_title, norm_cand) if len(norm_title) <= len(norm_cand) else (norm_cand, norm_title)
-    return shorter in longer and len(shorter) / len(longer) >= 0.6
+    return shorter in longer and len(shorter) / len(longer) >= 0.45
 
 
 # Strips year + all quality/codec tokens from an NZB title to extract the bare movie name
@@ -152,7 +152,7 @@ def _nzb_title_matches(query: str, nzb_name: str) -> bool:
     if nq == nb:
         return True
     shorter, longer = (nq, nb) if len(nq) <= len(nb) else (nb, nq)
-    return shorter in longer and len(shorter) / len(longer) >= 0.6
+    return shorter in longer and len(shorter) / len(longer) >= 0.45
 
 
 def _send_push(movie_title: str, language: str, year=None):
