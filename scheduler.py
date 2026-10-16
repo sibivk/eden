@@ -40,6 +40,8 @@ LIBRARY_PATHS = {
 # ── Config ────────────────────────────────────────────────────────────────────
 NZB_SEARCH_KEY = os.getenv('NZB_SEARCH_KEY', '') or os.getenv('NZBS_API_KEY', '')
 NZB_SEARCH_URL = os.getenv('NZB_SEARCH_URL', '')
+NZB_SEARCH_KEY2 = os.getenv('NZB_SEARCH_KEY2', '')
+NZB_SEARCH_URL2 = os.getenv('NZB_SEARCH_URL2', '')
 NZBGET_URL    = os.getenv('NZBGET_URL', '')
 NZBGET_USER   = os.getenv('NZBGET_USERNAME', '')
 NZBGET_PASS   = os.getenv('NZBGET_PASSWORD', '')
@@ -458,44 +460,26 @@ def scrape_einthusan() -> list:
 
 # ── NZB indexer search ────────────────────────────────────────────────────────
 
-def search_1080p(title: str) -> list:
+def _query_indexer(title: str, base_url: str, api_key: str, label: str) -> list:
     """
-    Search the configured Newznab indexer for the best available release:
-    1. 1080p (preferred)
-    2. HEVC + 5.1 audio (acceptable fallback when no 1080p exists)
-    3. 4K/UHD (last resort if within size limit)
-    All results are title-verified and filtered to 1 GB–10 GB, sorted smallest-first.
+    Query one Newznab indexer and return classified result buckets as a dict.
+    Returns {'1080': [...], 'hevc51': [...], '4k': [...]}.
     """
-    if not NZB_SEARCH_KEY:
-        logger.warning('NZB_SEARCH_KEY not set — skipping search')
-        return []
-    if not NZB_SEARCH_URL:
-        logger.warning('NZB_SEARCH_URL not set — skipping search')
-        return []
-
-    params = {'t': 'movie', 'apikey': NZB_SEARCH_KEY, 'q': title, 'extended': 1}
+    params = {'t': 'movie', 'apikey': api_key, 'q': title, 'extended': 1}
     try:
-        resp = requests.get(NZB_SEARCH_URL, params=params, timeout=15)
+        resp = requests.get(base_url, params=params, timeout=15)
         resp.raise_for_status()
         root = ET.fromstring(resp.text)
     except Exception as e:
-        logger.error('NZB indexer search error for "%s": %s', title, e)
-        return []
+        logger.error('%s search error for "%s": %s', label, title, e)
+        return {'1080': [], 'hevc51': [], '4k': []}
 
-    results_1080    = []
-    results_hevc_51 = []
-    results_4k      = []
-
+    r1080, rhevc, r4k = [], [], []
     for item in root.findall('.//item'):
         nzb_title = item.findtext('title') or ''
         link      = item.findtext('link') or ''
-
-        # Verify the NZB title actually corresponds to the searched movie
         if not _nzb_title_matches(title, nzb_title):
-            logger.debug('Title mismatch — skipping: query=%r nzb=%r', title, nzb_title)
             continue
-
-        # Parse size from newznab:attr, fall back to enclosure
         size = 0
         for attr in item.findall(f'{NEWZNAB_NS}attr'):
             if attr.attrib.get('name') == 'size':
@@ -507,28 +491,53 @@ def search_1080p(title: str) -> list:
             if enc is not None:
                 v = enc.attrib.get('length', '0')
                 size = int(v) if v.isdigit() else 0
-
         if size < MIN_SIZE_BYTES or size > MAX_SIZE_BYTES:
             continue
-
         q = _parse_quality(nzb_title)
         entry = {'title': nzb_title, 'url': link, 'size_bytes': size, 'quality': q}
-
         if q['resolution'] == '1080p':
-            results_1080.append(entry)
+            r1080.append(entry)
         elif q['resolution'] == '4K':
-            results_4k.append(entry)
+            r4k.append(entry)
         elif q['is_hevc'] and q['has_5_1']:
-            results_hevc_51.append(entry)
-        # else: skip — not an acceptable quality (no 1080p, no HEVC+5.1, not 4K)
+            rhevc.append(entry)
+    return {'1080': r1080, 'hevc51': rhevc, '4k': r4k}
 
-    if results_1080:
-        results = results_1080
-    elif results_hevc_51:
-        logger.info('No 1080p for "%s" — using HEVC+5.1 fallback (%d result(s))', title, len(results_hevc_51))
-        results = results_hevc_51
+
+def search_1080p(title: str) -> list:
+    """
+    Search configured Newznab indexer(s) for the best available release.
+    Tries primary first; if it returns nothing, tries backup (if configured).
+    Priority: 1080p > HEVC+5.1 > 4K. Results sorted smallest-first.
+    """
+    if not NZB_SEARCH_KEY or not NZB_SEARCH_URL:
+        logger.warning('NZB_SEARCH_URL/KEY not set — skipping search')
+        return []
+
+    indexers = [('NZBGeek', NZB_SEARCH_URL, NZB_SEARCH_KEY)]
+    if NZB_SEARCH_URL2 and NZB_SEARCH_KEY2:
+        indexers.append(('Backup', NZB_SEARCH_URL2, NZB_SEARCH_KEY2))
+
+    merged = {'1080': [], 'hevc51': [], '4k': []}
+    for label, url, key in indexers:
+        buckets = _query_indexer(title, url, key, label)
+        # Deduplicate by NZB title across indexers
+        seen = {e['title'] for e in merged['1080'] + merged['hevc51'] + merged['4k']}
+        for k in ('1080', 'hevc51', '4k'):
+            for e in buckets[k]:
+                if e['title'] not in seen:
+                    merged[k].append(e)
+                    seen.add(e['title'])
+        total = sum(len(v) for v in buckets.values())
+        logger.info('Search "%s" [%s] → %d results (after 10GB filter)', title, label, total)
+
+    if merged['1080']:
+        results = merged['1080']
+    elif merged['hevc51']:
+        logger.info('No 1080p for "%s" — using HEVC+5.1 fallback', title)
+        results = merged['hevc51']
     else:
-        results = results_4k
+        results = merged['4k']
 
     results.sort(key=lambda x: x['size_bytes'])
     return results
