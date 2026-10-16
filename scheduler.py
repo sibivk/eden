@@ -466,8 +466,9 @@ def _query_indexer(title: str, base_url: str, api_key: str, label: str) -> list:
     Returns {'1080': [...], 'hevc51': [...], '4k': [...]}.
     """
     params = {'t': 'movie', 'apikey': api_key, 'q': title, 'extended': 1}
+    headers = {'User-Agent': 'EdenMediaManager/1.0'}
     try:
-        resp = requests.get(base_url, params=params, timeout=15)
+        resp = requests.get(base_url, params=params, headers=headers, timeout=15)
         resp.raise_for_status()
         root = ET.fromstring(resp.text)
     except Exception as e:

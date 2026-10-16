@@ -125,9 +125,10 @@ def search_nzb():
         return jsonify({"error": "NZB indexer is not configured in .env"}), 500
 
     params = {"t": "movie", "apikey": NZB_SEARCH_KEY, "q": query, "extended": 1}
+    headers = {"User-Agent": "EdenMediaManager/1.0"}
 
     try:
-        resp = requests.get(NZB_SEARCH_URL, params=params, timeout=15)
+        resp = requests.get(NZB_SEARCH_URL, params=params, headers=headers, timeout=15)
         resp.raise_for_status()
         root = ET.fromstring(resp.text)
         results = []
