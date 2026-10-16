@@ -524,7 +524,9 @@ def search_1080p(title: str) -> list:
         indexers.append(('nzbs.in', NZB_SEARCH_URL3, NZB_SEARCH_KEY3))
 
     merged = {'1080': [], 'hevc51': [], '4k': []}
-    for label, url, key in indexers:
+    for i, (label, url, key) in enumerate(indexers):
+        if i > 0:
+            time.sleep(1)  # space out requests to avoid triggering rate limits
         buckets = _query_indexer(title, url, key, label)
         # Deduplicate by NZB title across indexers
         seen = {e['title'] for e in merged['1080'] + merged['hevc51'] + merged['4k']}
@@ -606,10 +608,13 @@ def auto_download_job():
 
     queued = skipped_exists = skipped_no_nzb = 0
 
-    for movie in movies:
+    for idx, movie in enumerate(movies):
         title = movie['title']
         lang  = movie['language']
         year  = movie.get('year')
+
+        if idx > 0:
+            time.sleep(2)  # 2s between movies keeps total rate well under indexer limits
 
         if _is_tracked(title, year):
             logger.debug('Already tracked: %s (%s)', title, year)

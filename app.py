@@ -205,7 +205,6 @@ def queue_nzb():
     data = request.get_json(silent=True) or {}
     nzb_url = data.get("url", "").strip()
     title = data.get("title", "Movie Download").strip()
-    category = data.get("category", NZB_CATEGORY).strip()
     language = data.get("language", "").strip().lower()
 
     if not nzb_url:
@@ -214,6 +213,8 @@ def queue_nzb():
         return jsonify({"error": "Invalid URL"}), 400
     if language and language not in VALID_LANGUAGES:
         return jsonify({"error": f"Invalid language '{language}' — must be malayalam, hindi or tamil"}), 400
+    # Lock category to the configured value — ignore whatever the caller sends
+    category = NZB_CATEGORY
 
     safe_title = _SAFE_TITLE_RE.sub("", title)[:200].strip()
     clean_name = clean_movie_title(safe_title)
