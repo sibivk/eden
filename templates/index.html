@@ -991,6 +991,23 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
       </div>
     </section>
 
+    <!-- Watchlist (starred from Release Calendar) -->
+    <section id="watchlistSection" hidden>
+      <div class="content-row" id="watchlistRow">
+        <div class="row-header">
+          <div class="row-title">
+            <div class="row-accent" style="background:#fbbf24"></div>
+            ★ Watchlist
+          </div>
+          <div class="row-nav">
+            <button class="row-nav-btn" onclick="scrollRow('watchlistTrack',-1)" title="Scroll left">‹</button>
+            <button class="row-nav-btn" onclick="scrollRow('watchlistTrack', 1)" title="Scroll right">›</button>
+          </div>
+        </div>
+        <div class="poster-track" id="watchlistTrack"></div>
+      </div>
+    </section>
+
     <!-- Search results -->
     <section id="searchSection" hidden>
       <div class="lang-queue-bar">
@@ -1041,6 +1058,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
         <span class="chevron" id="calChevron">▾</span>
       </button>
       <div id="calendarPanel" style="display:none">
+        <div id="calMonthLabel" style="padding:8px 14px 2px;font-size:0.7rem;font-weight:700;color:var(--primary);letter-spacing:0.5px;text-transform:uppercase"></div>
         <div id="calendarContent" class="cal-list">
           <div class="sw-loading">Loading…</div>
         </div>
@@ -1482,9 +1500,10 @@ async function doSearch() {
   if (!query) { input.focus(); return; }
 
   /* Switch to search view */
-  document.getElementById('catalogSection').hidden = true;
-  document.getElementById('langTabsBar').hidden    = true;
-  document.getElementById('searchSection').hidden  = false;
+  document.getElementById('catalogSection').hidden   = true;
+  document.getElementById('watchlistSection').hidden = true;
+  document.getElementById('langTabsBar').hidden      = true;
+  document.getElementById('searchSection').hidden    = false;
 
   btn.disabled = true;
   status.className = '';
@@ -1515,11 +1534,16 @@ async function doSearch() {
 }
 
 function showCatalog() {
-  document.getElementById('catalogSection').hidden = false;
-  document.getElementById('langTabsBar').hidden    = false;
-  document.getElementById('searchSection').hidden  = true;
-  document.getElementById('status').innerHTML      = '';
-  document.getElementById('results').innerHTML     = '';
+  document.getElementById('catalogSection').hidden  = false;
+  document.getElementById('langTabsBar').hidden     = false;
+  document.getElementById('searchSection').hidden   = true;
+  document.getElementById('status').innerHTML       = '';
+  document.getElementById('results').innerHTML      = '';
+  // Re-show watchlist section only if it has cards
+  const track = document.getElementById('watchlistTrack');
+  if (track && track.querySelector('.poster-card')) {
+    document.getElementById('watchlistSection').hidden = false;
+  }
 }
 
 function searchForMovie(titleEnc, yearEnc) {
@@ -1888,9 +1912,10 @@ async function loadCalendar() {
       _watchlistMap[_normWl(item.title)] = item;
     }
 
-    // Update header with "🗓 September 2026"
+    // Set month/year label inside the panel (header button stays "Release Calendar")
     if (data.label) {
-      document.getElementById('calHeader').textContent = '🗓 ' + data.label;
+      const lbl = document.getElementById('calMonthLabel');
+      if (lbl) lbl.textContent = data.label;
     }
     _calMonth = data.month || now.getMonth() + 1;
     _calYear  = data.year  || now.getFullYear();
@@ -1939,6 +1964,90 @@ async function loadCalendar() {
   }
 }
 
+/* ─── Watchlist section (main content) ─── */
+async function loadWatchlistSection() {
+  try {
+    const res  = await fetch('/api/watchlist');
+    const data = await res.json();
+    const items = data.watchlist || [];
+    const section = document.getElementById('watchlistSection');
+    const track   = document.getElementById('watchlistTrack');
+    if (!section || !track) return;
+
+    if (!items.length) {
+      section.hidden = true;
+      track.innerHTML = '';
+      return;
+    }
+
+    // Don't show while search section is active
+    const inSearch = !document.getElementById('searchSection').hidden;
+    section.hidden = inSearch;
+    track.innerHTML = items.map(m => _wlCardHTML(m)).join('');
+    track.querySelectorAll('.poster-card[data-title]').forEach(card => {
+      posterObserver.observe(card);
+    });
+  } catch (_) {}
+}
+
+function _wlCardHTML(m) {
+  const t        = esc(m.title);
+  const y        = esc(m.year || '');
+  const lang     = (m.language || 'malayalam').toLowerCase();
+  const titleEnc = encodeURIComponent(m.title);
+  const yearEnc  = encodeURIComponent(m.year || '');
+  const wlIdEnc  = encodeURIComponent(m.id);
+  return `
+    <div class="poster-card" data-title="${t}" data-year="${y}" data-lang="${esc(lang)}"
+         onclick="openMovieModal('${titleEnc}','${yearEnc}','${esc(lang)}')"
+         style="cursor:pointer">
+      <div class="poster-img-wrap">
+        <div class="poster-grad pg-${lang}">
+          <div class="poster-grad-title">${t}</div>
+        </div>
+        ${y ? `<div class="poster-year-badge">${y}</div>` : ''}
+        <div class="poster-lang-badge">${_langLabel(lang)}</div>
+        <div class="poster-overlay">
+          <button class="poster-grab-btn"
+                  onclick="event.stopPropagation();_wlRemoveCard('${wlIdEnc}','${titleEnc}',this)">
+            ✕ Unwatch
+          </button>
+        </div>
+      </div>
+      <div class="poster-label">${t}</div>
+      ${y ? `<div class="poster-year">${y}</div>` : ''}
+    </div>`;
+}
+
+async function _wlRemoveCard(wlIdEnc, titleEnc, btn) {
+  const wlId = decodeURIComponent(wlIdEnc);
+  const title = decodeURIComponent(titleEnc);
+  try {
+    await fetch(`/api/watchlist/${encodeURIComponent(wlId)}`, { method: 'DELETE' });
+    // Remove card from the watchlist row
+    const card = btn.closest('.poster-card');
+    if (card) card.remove();
+    // Hide section if now empty
+    const track = document.getElementById('watchlistTrack');
+    if (track && !track.querySelector('.poster-card')) {
+      document.getElementById('watchlistSection').hidden = true;
+    }
+    // Unstar matching calendar button if visible
+    delete _watchlistMap[_normWl(title)];
+    document.querySelectorAll('.cal-watch-btn.active').forEach(b => {
+      if (decodeURIComponent(b.dataset.title) === title) {
+        b.classList.remove('active');
+        b.textContent  = '☆';
+        b.dataset.wlId = '';
+        b.title        = 'Watch for this movie daily';
+      }
+    });
+    toast(`Removed "${title}" from watchlist`, 'success');
+  } catch (_) {
+    toast('Error removing from watchlist', 'error');
+  }
+}
+
 async function toggleWatch(e, btn) {
   e.stopPropagation();
   const title    = decodeURIComponent(btn.dataset.title);
@@ -1956,6 +2065,7 @@ async function toggleWatch(e, btn) {
       btn.title        = 'Watch for this movie daily';
       delete _watchlistMap[_normWl(title)];
       toast(`Removed "${title}" from watchlist`, 'success');
+      loadWatchlistSection();
     } else {
       const res  = await fetch('/api/watchlist', {
         method: 'POST',
@@ -1970,6 +2080,7 @@ async function toggleWatch(e, btn) {
         btn.title        = 'Remove from watchlist';
         _watchlistMap[_normWl(title)] = { id: d.id, title };
         toast(`"${title}" added — Eden will search daily`, 'success');
+        loadWatchlistSection();
       } else {
         throw new Error(d.error || 'Failed');
       }
@@ -2004,6 +2115,7 @@ document.getElementById('query').addEventListener('keydown', e => { if (e.key ==
 loadCatalog();
 loadSidebarNews();
 loadStats();
+loadWatchlistSection();
 </script>
 </body>
 </html>
