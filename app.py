@@ -624,11 +624,105 @@ def _scrape_calendar(year: int) -> list:
     return movies
 
 
+# ── Filmibeat scraper ──────────────────────────────────────────────────────────
+
+FILMIBEAT_URLS = {
+    'Malayalam': 'https://www.filmibeat.com/malayalam/movies.html',
+    'Hindi':     'https://www.filmibeat.com/bollywood/movies.html',
+    'Kannada':   'https://www.filmibeat.com/kannada/movies.html',
+}
+_FB_DATE_RE = re.compile(
+    r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*'
+    r'[,\s]+(\d{4})',
+    re.IGNORECASE,
+)
+_FB_MONTH_MAP = {
+    'jan':1,'feb':2,'mar':3,'apr':4,'may':5,'jun':6,
+    'jul':7,'aug':8,'sep':9,'oct':10,'nov':11,'dec':12,
+}
+
+def _scrape_filmibeat(year: int) -> list:
+    """Scrape filmibeat.com for Malayalam, Hindi (bollywood), and Kannada releases."""
+    movies = []
+    seen: set = set()
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+                      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+    }
+    for language, url in FILMIBEAT_URLS.items():
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            count = 0
+            for card in soup.find_all('div', class_='fb-movie-details'):
+                h3 = card.find('h3')
+                if not h3:
+                    continue
+                title = h3.get_text(strip=True)
+                if not title:
+                    continue
+                date_div = card.find('div', class_='fb-movie-rels-date')
+                if not date_div:
+                    continue
+                m = _FB_DATE_RE.search(date_div.get_text(strip=True))
+                if not m:
+                    continue
+                dy  = int(m.group(1))
+                mo  = _FB_MONTH_MAP[m.group(2).lower()[:3]]
+                yr  = int(m.group(3))
+                if yr != year:
+                    continue
+                parent = card.parent
+                img = parent.find('img') if parent else None
+                poster = ''
+                if img:
+                    poster = (img.get('src') or img.get('data-src', '')).strip()
+                    if not poster.startswith('http'):
+                        poster = ''
+                key = (re.sub(r'[^\w]', '', title.lower()), mo)
+                if key in seen:
+                    continue
+                seen.add(key)
+                movies.append({
+                    'title': title, 'month': mo, 'day': dy,
+                    'poster': poster, 'language': language,
+                })
+                count += 1
+            logger.info('Filmibeat [%s]: %d movies', language, count)
+        except Exception as e:
+            logger.error('Filmibeat scrape failed [%s]: %s', language, e)
+    return movies
+
+
+def _fetch_all_calendar(year: int) -> list:
+    """Merge bollywoodmdb + filmibeat calendars, deduplicated by (title, month)."""
+    primary = []
+    try:
+        primary = _scrape_calendar(year)
+    except Exception as e:
+        logger.warning('bollywoodmdb calendar failed: %s', e)
+
+    secondary = _scrape_filmibeat(year)
+
+    seen = {(re.sub(r'[^\w]', '', m['title'].lower()), m['month']) for m in primary}
+    for m in secondary:
+        key = (re.sub(r'[^\w]', '', m['title'].lower()), m['month'])
+        if key not in seen:
+            primary.append(m)
+            seen.add(key)
+
+    primary.sort(key=lambda x: (x['month'], x['day']))
+    logger.info('Combined calendar: %d movies for %d', len(primary), year)
+    return primary
+
+
 def _refresh_calendar_bg():
     global _cal_bg_running
     year = _dt.now().year
     try:
-        all_movies = _scrape_calendar(year)
+        all_movies = _fetch_all_calendar(year)
         _cal_cache.update({'data': all_movies, 'at': time.time(), 'year': year})
         logger.info('Calendar background refresh done: %d movies', len(all_movies))
     except Exception as e:
@@ -659,7 +753,7 @@ def api_calendar():
 
     # Cold start — no data at all; scrape synchronously
     try:
-        all_movies = _scrape_calendar(year)
+        all_movies = _fetch_all_calendar(year)
         _cal_cache.update({'data': all_movies, 'at': time.time(), 'year': year})
         movies = [m for m in all_movies if m['month'] == month]
         return jsonify({'movies': movies, 'month': month, 'year': year, 'label': label})
@@ -674,7 +768,7 @@ def _prewarm_calendar():
     """Pre-populate the calendar cache at startup so the first open is instant."""
     year = _dt.now().year
     try:
-        all_movies = _scrape_calendar(year)
+        all_movies = _fetch_all_calendar(year)
         _cal_cache.update({'data': all_movies, 'at': time.time(), 'year': year})
         logger.info('Calendar pre-warm done: %d movies', len(all_movies))
     except Exception as e:
