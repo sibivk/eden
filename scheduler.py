@@ -808,10 +808,22 @@ def auto_download_job():
 
     queued = skipped_exists = skipped_no_nzb = 0
 
+    _current_year = datetime.utcnow().year
+
     for idx, movie in enumerate(movies):
         title = movie['title']
         lang  = movie['language']
         year  = movie.get('year')
+
+        # Skip movies older than current_year - 1 (Eden is for recent/upcoming releases only)
+        if year:
+            try:
+                if int(year) < _current_year - 1:
+                    logger.debug('Skipping old movie (%s): %s', year, title)
+                    skipped_exists += 1
+                    continue
+            except (ValueError, TypeError):
+                pass
 
         if idx > 0:
             time.sleep(2)  # 2s between movies keeps total rate well under indexer limits
@@ -897,6 +909,14 @@ def auto_download_job():
         year  = wl_item.get('year')
         if not title:
             continue
+
+        if year:
+            try:
+                if int(year) < _current_year - 1:
+                    logger.debug('Watchlist: skipping old movie (%s): %s', year, title)
+                    continue
+            except (ValueError, TypeError):
+                pass
 
         time.sleep(2)
 
