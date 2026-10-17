@@ -1388,18 +1388,20 @@ async function loadHeroBackdrop(title, year) {
 let _modalTrailerKey = '';
 
 function openMovieModal(titleEnc, yearEnc, lang) {
-  const title = decodeURIComponent(titleEnc);
-  const year  = decodeURIComponent(yearEnc);
-  const modal = document.getElementById('movieModal');
-  const body  = document.getElementById('modalBody');
+  const title  = decodeURIComponent(titleEnc);
+  const year   = decodeURIComponent(yearEnc);
+  const wlItem = _watchlistMap[_normWl(title)];
+  const wlId   = wlItem ? wlItem.id : null;
+  const modal  = document.getElementById('movieModal');
+  const body   = document.getElementById('modalBody');
   body.innerHTML = '<div class="modal-loading">Loading…</div>';
   modal.classList.add('open');
   document.body.style.overflow = 'hidden';
   _stopTrailer();
   fetch(`/api/movie-detail?title=${titleEnc}&year=${yearEnc}`)
     .then(r => r.json())
-    .then(d => _renderModal(title, year, d))
-    .catch(() => _renderModal(title, year, {}));
+    .then(d => _renderModal(title, year, d, wlId))
+    .catch(() => _renderModal(title, year, {}, wlId));
 }
 
 function _stopTrailer() {
@@ -1443,7 +1445,7 @@ function _setupOverlayFade() {
   }, 5000);
 }
 
-function _renderModal(title, year, d) {
+function _renderModal(title, year, d, wlId = null) {
   const body = document.getElementById('modalBody');
   if (!body) return;
 
@@ -1466,6 +1468,15 @@ function _renderModal(title, year, d) {
   if (d.writers  && d.writers.length)  credits.push(`<div class="modal-credit"><strong>Writer${d.writers.length > 1 ? 's' : ''}:</strong> ${d.writers.map(esc).join(', ')}</div>`);
   if (d.stars    && d.stars.length)    credits.push(`<div class="modal-credit"><strong>Stars:</strong> ${d.stars.map(esc).join(', ')}</div>`);
 
+  const favBtn = wlId
+    ? `<button id="modalFavBtn"
+               onclick="_modalRemoveFav('${esc(wlId)}','${encodeURIComponent(title)}')"
+               style="margin-top:10px;padding:7px 16px;background:rgba(245,158,11,0.1);
+                      border:1px solid rgba(245,158,11,0.3);border-radius:9px;color:#fbbf24;
+                      font-family:var(--font);font-size:0.8rem;font-weight:700;cursor:pointer;">
+         ★ Remove from Favourites
+       </button>` : '';
+
   body.innerHTML = `
     <div class="modal-top">
       <div class="modal-poster">${posterHTML}</div>
@@ -1478,11 +1489,46 @@ function _renderModal(title, year, d) {
         <div class="modal-meta">
           ${d.overview ? `<div class="modal-overview">${esc(d.overview)}</div>` : ''}
           ${credits.join('')}
+          ${favBtn}
         </div>
       </div>
     </div>`;
   _isMuted = true;
   if (d.trailer_key) _setupOverlayFade();
+}
+
+async function _modalRemoveFav(wlId, titleEnc) {
+  const title = decodeURIComponent(titleEnc);
+  const btn   = document.getElementById('modalFavBtn');
+  if (btn) btn.disabled = true;
+  try {
+    await fetch(`/api/watchlist/${encodeURIComponent(wlId)}`, { method: 'DELETE' });
+    delete _watchlistMap[_normWl(title)];
+    // Remove card from watchlist section
+    const track = document.getElementById('watchlistTrack');
+    if (track) {
+      track.querySelectorAll('.poster-card').forEach(card => {
+        if (esc(title) === card.dataset.title) card.remove();
+      });
+      if (!track.querySelector('.poster-card')) {
+        document.getElementById('watchlistSection').hidden = true;
+      }
+    }
+    // Unstar calendar button if visible
+    document.querySelectorAll('.cal-watch-btn.active').forEach(b => {
+      if (decodeURIComponent(b.dataset.title) === title) {
+        b.classList.remove('active');
+        b.textContent  = '☆';
+        b.dataset.wlId = '';
+        b.title        = 'Watch for this movie daily';
+      }
+    });
+    if (btn) btn.remove();
+    toast(`Removed "${title}" from favourites`, 'success');
+  } catch (_) {
+    if (btn) btn.disabled = false;
+    toast('Error removing from favourites', 'error');
+  }
 }
 
 /* ─── Scroll row left/right ─── */
@@ -1974,6 +2020,10 @@ async function loadWatchlistSection() {
     const track   = document.getElementById('watchlistTrack');
     if (!section || !track) return;
 
+    // Keep watchlistMap in sync so the movie modal can check membership
+    _watchlistMap = {};
+    for (const item of items) { _watchlistMap[_normWl(item.title)] = item; }
+
     if (!items.length) {
       section.hidden = true;
       track.innerHTML = '';
@@ -1996,7 +2046,6 @@ function _wlCardHTML(m) {
   const lang     = (m.language || 'malayalam').toLowerCase();
   const titleEnc = encodeURIComponent(m.title);
   const yearEnc  = encodeURIComponent(m.year || '');
-  const wlIdEnc  = encodeURIComponent(m.id);
   return `
     <div class="poster-card" data-title="${t}" data-year="${y}" data-lang="${esc(lang)}"
          onclick="openMovieModal('${titleEnc}','${yearEnc}','${esc(lang)}')"
@@ -2007,46 +2056,13 @@ function _wlCardHTML(m) {
         </div>
         ${y ? `<div class="poster-year-badge">${y}</div>` : ''}
         <div class="poster-lang-badge">${_langLabel(lang)}</div>
-        <div class="poster-overlay">
-          <button class="poster-grab-btn"
-                  onclick="event.stopPropagation();_wlRemoveCard('${wlIdEnc}','${titleEnc}',this)">
-            ✕ Unwatch
-          </button>
-        </div>
+        <div class="poster-overlay"></div>
       </div>
       <div class="poster-label">${t}</div>
       ${y ? `<div class="poster-year">${y}</div>` : ''}
     </div>`;
 }
 
-async function _wlRemoveCard(wlIdEnc, titleEnc, btn) {
-  const wlId = decodeURIComponent(wlIdEnc);
-  const title = decodeURIComponent(titleEnc);
-  try {
-    await fetch(`/api/watchlist/${encodeURIComponent(wlId)}`, { method: 'DELETE' });
-    // Remove card from the watchlist row
-    const card = btn.closest('.poster-card');
-    if (card) card.remove();
-    // Hide section if now empty
-    const track = document.getElementById('watchlistTrack');
-    if (track && !track.querySelector('.poster-card')) {
-      document.getElementById('watchlistSection').hidden = true;
-    }
-    // Unstar matching calendar button if visible
-    delete _watchlistMap[_normWl(title)];
-    document.querySelectorAll('.cal-watch-btn.active').forEach(b => {
-      if (decodeURIComponent(b.dataset.title) === title) {
-        b.classList.remove('active');
-        b.textContent  = '☆';
-        b.dataset.wlId = '';
-        b.title        = 'Watch for this movie daily';
-      }
-    });
-    toast(`Removed "${title}" from watchlist`, 'success');
-  } catch (_) {
-    toast('Error removing from watchlist', 'error');
-  }
-}
 
 async function toggleWatch(e, btn) {
   e.stopPropagation();
