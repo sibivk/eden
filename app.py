@@ -629,6 +629,7 @@ def _scrape_calendar(year: int) -> list:
 FILMIBEAT_URLS = {
     'Malayalam': 'https://www.filmibeat.com/malayalam/movies.html',
     'Hindi':     'https://www.filmibeat.com/bollywood/movies.html',
+    'Tamil':     'https://www.filmibeat.com/tamil/movies.html',
 }
 _FB_DATE_RE = re.compile(
     r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*'
