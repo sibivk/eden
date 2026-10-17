@@ -44,6 +44,8 @@ NZB_SEARCH_KEY2 = os.getenv('NZB_SEARCH_KEY2', '')
 NZB_SEARCH_URL2 = os.getenv('NZB_SEARCH_URL2', '')
 NZB_SEARCH_KEY3 = os.getenv('NZB_SEARCH_KEY3', '')
 NZB_SEARCH_URL3 = os.getenv('NZB_SEARCH_URL3', '')
+RADARR_URL    = os.getenv('RADARR_URL', '').rstrip('/')
+RADARR_API_KEY = os.getenv('RADARR_API_KEY', '')
 NZBGET_URL    = os.getenv('NZBGET_URL', '')
 NZBGET_USER   = os.getenv('NZBGET_USERNAME', '')
 NZBGET_PASS   = os.getenv('NZBGET_PASSWORD', '')
@@ -507,28 +509,160 @@ def _query_indexer(title: str, base_url: str, api_key: str, label: str) -> list:
     return {'1080': r1080, 'hevc51': rhevc, '4k': r4k}
 
 
-def search_1080p(title: str) -> list:
+def _radarr_search(title: str, year=None) -> list:
     """
-    Search configured Newznab indexer(s) for the best available release.
-    Tries primary first; if it returns nothing, tries backup (if configured).
+    Search for NZB releases via Radarr's interactive search API.
+    Radarr queries all its configured indexers (e.g. nzbs.in) — no direct AI contact.
+    Temporarily adds the movie (monitored=False), searches, then removes it.
+    Returns results in the same format as _query_indexer entries.
+    """
+    if not RADARR_URL or not RADARR_API_KEY or not TMDB_API_KEY:
+        return []
+
+    hdrs = {'X-Api-Key': RADARR_API_KEY, 'User-Agent': 'EdenMediaManager/1.0'}
+
+    # 1. Get TMDB movie ID
+    try:
+        params = {'api_key': TMDB_API_KEY, 'query': title, 'language': 'en-US', 'page': 1}
+        if year:
+            params['primary_release_year'] = year
+        r = requests.get('https://api.themoviedb.org/3/search/movie', params=params, timeout=8)
+        r.raise_for_status()
+        tmdb_results = r.json().get('results', [])
+        if not tmdb_results and year:
+            params.pop('primary_release_year')
+            r = requests.get('https://api.themoviedb.org/3/search/movie', params=params, timeout=8)
+            r.raise_for_status()
+            tmdb_results = r.json().get('results', [])
+        if not tmdb_results:
+            logger.info('Radarr search: no TMDB match for "%s"', title)
+            return []
+        tmdb_id = tmdb_results[0]['id']
+    except Exception as e:
+        logger.warning('Radarr search: TMDB lookup failed for "%s": %s', title, e)
+        return []
+
+    # 2. Check if movie is already in Radarr
+    radarr_id = None
+    added = False
+    try:
+        r = requests.get(f'{RADARR_URL}/api/v3/movie', headers=hdrs, timeout=10)
+        r.raise_for_status()
+        existing = next((m for m in r.json() if m.get('tmdbId') == tmdb_id), None)
+        if existing:
+            radarr_id = existing['id']
+    except Exception as e:
+        logger.warning('Radarr: list movies failed: %s', e)
+        return []
+
+    # 3. Add temporarily if not already in Radarr
+    if radarr_id is None:
+        try:
+            qp = requests.get(f'{RADARR_URL}/api/v3/qualityProfile', headers=hdrs, timeout=8)
+            qp.raise_for_status()
+            profiles = qp.json()
+            quality_profile_id = next(
+                (p['id'] for p in profiles if 'any' in p.get('name', '').lower()),
+                profiles[0]['id'] if profiles else 1,
+            )
+
+            rf = requests.get(f'{RADARR_URL}/api/v3/rootFolder', headers=hdrs, timeout=8)
+            rf.raise_for_status()
+            folders = rf.json()
+            root_folder_path = folders[0]['path'] if folders else '/movies'
+
+            lu = requests.get(f'{RADARR_URL}/api/v3/movie/lookup/tmdb',
+                              params={'tmdbId': tmdb_id}, headers=hdrs, timeout=10)
+            lu.raise_for_status()
+            movie_data = lu.json()
+            movie_data.update({
+                'qualityProfileId': quality_profile_id,
+                'rootFolderPath': root_folder_path,
+                'monitored': False,
+                'addOptions': {'searchForMovie': False},
+            })
+            add_hdrs = {**hdrs, 'Content-Type': 'application/json'}
+            add_r = requests.post(f'{RADARR_URL}/api/v3/movie',
+                                  json=movie_data, headers=add_hdrs, timeout=10)
+            if add_r.status_code == 400:
+                # Already exists despite not appearing in list — find it
+                all_r = requests.get(f'{RADARR_URL}/api/v3/movie', headers=hdrs, timeout=10)
+                all_r.raise_for_status()
+                existing = next((m for m in all_r.json() if m.get('tmdbId') == tmdb_id), None)
+                if existing:
+                    radarr_id = existing['id']
+                else:
+                    logger.warning('Radarr: add "%s" returned 400: %s', title, add_r.text[:200])
+                    return []
+            else:
+                add_r.raise_for_status()
+                radarr_id = add_r.json()['id']
+                added = True
+                logger.info('Radarr: added "%s" (tmdbId=%d) for search', title, tmdb_id)
+        except Exception as e:
+            logger.warning('Radarr: could not add "%s": %s', title, e)
+            return []
+
+    # 4. Interactive release search
+    results = []
+    try:
+        time.sleep(0.5)
+        rel_r = requests.get(f'{RADARR_URL}/api/v3/release',
+                             params={'movieId': radarr_id}, headers=hdrs, timeout=30)
+        rel_r.raise_for_status()
+        for rel in rel_r.json():
+            if rel.get('protocol') != 'usenet':
+                continue
+            nzb_title = rel.get('title', '')
+            dl_url    = rel.get('downloadUrl', '')
+            size      = rel.get('size', 0)
+            if not dl_url or not nzb_title:
+                continue
+            if not _nzb_title_matches(title, nzb_title):
+                continue
+            if size < MIN_SIZE_BYTES or size > MAX_SIZE_BYTES:
+                continue
+            results.append({'title': nzb_title, 'url': dl_url,
+                            'size_bytes': size, 'quality': _parse_quality(nzb_title)})
+        logger.info('Radarr search "%s" → %d usenet results', title, len(results))
+    except Exception as e:
+        logger.warning('Radarr: release search failed for "%s": %s', title, e)
+
+    # 5. Clean up — remove from Radarr if we temporarily added it
+    if added and radarr_id:
+        try:
+            requests.delete(
+                f'{RADARR_URL}/api/v3/movie/{radarr_id}',
+                params={'deleteFiles': 'false', 'addImportExclusion': 'false'},
+                headers=hdrs, timeout=10,
+            )
+            logger.info('Radarr: cleaned up "%s"', title)
+        except Exception as e:
+            logger.warning('Radarr: cleanup failed for id=%d: %s', radarr_id, e)
+
+    return results
+
+
+def search_1080p(title: str, year=None) -> list:
+    """
+    Search all configured sources for the best available release.
+    Direct: NZBGeek, NZBFinder. Via Radarr: nzbs.in + any other Radarr indexers.
     Priority: 1080p > HEVC+5.1 > 4K. Results sorted smallest-first.
     """
     if not NZB_SEARCH_KEY or not NZB_SEARCH_URL:
         logger.warning('NZB_SEARCH_URL/KEY not set — skipping search')
         return []
 
+    # Direct Newznab indexers (NZBGeek + NZBFinder)
     indexers = [('NZBGeek', NZB_SEARCH_URL, NZB_SEARCH_KEY)]
     if NZB_SEARCH_URL2 and NZB_SEARCH_KEY2:
         indexers.append(('NZBFinder', NZB_SEARCH_URL2, NZB_SEARCH_KEY2))
-    if NZB_SEARCH_URL3 and NZB_SEARCH_KEY3:
-        indexers.append(('nzbs.in', NZB_SEARCH_URL3, NZB_SEARCH_KEY3))
 
     merged = {'1080': [], 'hevc51': [], '4k': []}
     for i, (label, url, key) in enumerate(indexers):
         if i > 0:
-            time.sleep(1)  # space out requests to avoid triggering rate limits
+            time.sleep(1)
         buckets = _query_indexer(title, url, key, label)
-        # Deduplicate by NZB title across indexers
         seen = {e['title'] for e in merged['1080'] + merged['hevc51'] + merged['4k']}
         for k in ('1080', 'hevc51', '4k'):
             for e in buckets[k]:
@@ -536,7 +670,21 @@ def search_1080p(title: str) -> list:
                     merged[k].append(e)
                     seen.add(e['title'])
         total = sum(len(v) for v in buckets.values())
-        logger.info('Search "%s" [%s] → %d results (after 10GB filter)', title, label, total)
+        logger.info('Search "%s" [%s] → %d results', title, label, total)
+
+    # Radarr search (covers nzbs.in + any other indexers configured in Radarr)
+    if RADARR_URL and RADARR_API_KEY:
+        radarr_hits = _radarr_search(title, year)
+        seen = {e['title'] for e in merged['1080'] + merged['hevc51'] + merged['4k']}
+        for r in radarr_hits:
+            if r['title'] not in seen:
+                q = r['quality']
+                bucket = ('1080' if q['resolution'] == '1080p'
+                          else '4k' if q['resolution'] == '4K'
+                          else 'hevc51' if (q['is_hevc'] and q['has_5_1']) else None)
+                if bucket:
+                    merged[bucket].append(r)
+                seen.add(r['title'])
 
     if merged['1080']:
         results = merged['1080']
@@ -626,7 +774,7 @@ def auto_download_job():
             skipped_exists += 1
             continue
 
-        results = search_1080p(title)
+        results = search_1080p(title, year)
         if not results:
             logger.info('No 1080p NZB (1–10 GB) found for: %s', title)
             skipped_no_nzb += 1

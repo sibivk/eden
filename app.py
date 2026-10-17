@@ -36,6 +36,8 @@ NZB_SEARCH_KEY2 = os.getenv("NZB_SEARCH_KEY2", "")
 NZB_SEARCH_URL2 = os.getenv("NZB_SEARCH_URL2", "")
 NZB_SEARCH_KEY3 = os.getenv("NZB_SEARCH_KEY3", "")
 NZB_SEARCH_URL3 = os.getenv("NZB_SEARCH_URL3", "")
+RADARR_URL     = os.getenv("RADARR_URL", "").rstrip("/")
+RADARR_API_KEY = os.getenv("RADARR_API_KEY", "")
 NZBGET_URL = os.getenv("NZBGET_URL", "http://localhost:6789")
 NZBGET_USER = os.getenv("NZBGET_USERNAME", "nzbget")
 NZBGET_PASS = os.getenv("NZBGET_PASSWORD", "")
@@ -172,11 +174,10 @@ def search_nzb():
     if not NZB_SEARCH_KEY or not NZB_SEARCH_URL:
         return jsonify({"error": "NZB indexer is not configured in .env"}), 500
 
+    # Direct Newznab indexers (NZBGeek + NZBFinder)
     indexers = [("NZBGeek", NZB_SEARCH_URL, NZB_SEARCH_KEY)]
     if NZB_SEARCH_URL2 and NZB_SEARCH_KEY2:
         indexers.append(("NZBFinder", NZB_SEARCH_URL2, NZB_SEARCH_KEY2))
-    if NZB_SEARCH_URL3 and NZB_SEARCH_KEY3:
-        indexers.append(("nzbs.in", NZB_SEARCH_URL3, NZB_SEARCH_KEY3))
 
     seen_titles = set()
     results = []
@@ -186,6 +187,25 @@ def search_nzb():
                 seen_titles.add(r["title"])
                 results.append(r)
 
+    # Radarr fallback — covers nzbs.in; only called when direct indexers find nothing
+    if not results and RADARR_URL and RADARR_API_KEY:
+        try:
+            from scheduler import _radarr_search
+            for r in _radarr_search(query):
+                if r["title"] not in seen_titles:
+                    seen_titles.add(r["title"])
+                    results.append({
+                        "title":        r["title"],
+                        "download_url": r["url"],
+                        "size_bytes":   r["size_bytes"],
+                        "grabs":        0,
+                        "imdb_rating":  None,
+                        "imdb_votes":   0,
+                        "quality":      r["quality"],
+                    })
+        except Exception as e:
+            logger.warning("Radarr UI fallback failed: %s", e)
+
     def _sort_key(r):
         res = r["quality"]["resolution"]
         prio = {"1080p": 0, "4K": 1}.get(res, 3)
@@ -194,7 +214,7 @@ def search_nzb():
         return (prio, -(r["imdb_rating"] or 0), -r["imdb_votes"])
 
     results.sort(key=_sort_key)
-    logger.info("UI search '%s' → %d total results across %d indexers", query, len(results), len(indexers))
+    logger.info("UI search '%s' → %d results", query, len(results))
     return jsonify({"results": results})
 
 
