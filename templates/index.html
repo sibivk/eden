@@ -797,6 +797,16 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 }
 .cal-lang { color: var(--muted); font-weight: 400; }
 
+.cal-watch-btn {
+  flex-shrink: 0; background: none; border: none; cursor: pointer;
+  color: var(--muted); font-size: 1.05rem; padding: 4px 5px;
+  border-radius: 6px; line-height: 1;
+  transition: color 0.18s, background 0.18s;
+}
+.cal-watch-btn:hover { color: #fbbf24; background: rgba(245,158,11,0.1); }
+.cal-watch-btn.active { color: #fbbf24; }
+.cal-watch-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
 /* ── Movie detail modal ── */
 #movieModal {
   display: none; position: fixed; inset: 0; z-index: 9000;
@@ -1856,19 +1866,34 @@ function closeMobDrawer() {
 const _MONTH_ABBRS = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let _calLoaded = false;
 let _calMonth  = 0;
+let _calYear   = new Date().getFullYear();
+let _watchlistMap = {};  // normalized title → {id, title}
+
+function _normWl(t) { return t.toLowerCase().replace(/[^\w]/g, ''); }
 
 async function loadCalendar() {
   const el = document.getElementById('calendarContent');
   try {
-    const res  = await fetch('/api/calendar');
-    const data = await res.json();
-    const now  = new Date();
+    const [calRes, wlRes] = await Promise.all([
+      fetch('/api/calendar'),
+      fetch('/api/watchlist'),
+    ]);
+    const data   = await calRes.json();
+    const wlData = await wlRes.json();
+    const now    = new Date();
+
+    // Rebuild watchlist lookup
+    _watchlistMap = {};
+    for (const item of (wlData.watchlist || [])) {
+      _watchlistMap[_normWl(item.title)] = item;
+    }
 
     // Update header with "🗓 September 2026"
     if (data.label) {
       document.getElementById('calHeader').textContent = '🗓 ' + data.label;
     }
     _calMonth = data.month || now.getMonth() + 1;
+    _calYear  = data.year  || now.getFullYear();
 
     const movies = data.movies || [];
     if (!movies.length) {
@@ -1886,17 +1911,73 @@ async function loadCalendar() {
       const art = m.poster
         ? `<img class="cal-poster" src="${esc(m.poster)}" alt="" loading="lazy" onerror="this.parentNode.innerHTML='<div class=\\'cal-poster-ph\\'>${esc(m.title.charAt(0).toUpperCase())}</div>'">`
         : `<div class="cal-poster-ph">${esc(m.title.charAt(0).toUpperCase())}</div>`;
+
+      const wlItem   = _watchlistMap[_normWl(m.title)];
+      const isWatched = !!wlItem;
+      const titleEnc = encodeURIComponent(m.title);
+      const langEnc  = encodeURIComponent((m.language || '').toLowerCase());
+      const yearEnc  = encodeURIComponent(_calYear);
+
       return `<div class="cal-item">
         ${art}
         <div class="cal-info">
           ${dateStr ? `<div class="cal-date">${dateStr}</div>` : ''}
           <div class="cal-title">${t}${lang}</div>
         </div>
+        <button class="cal-watch-btn${isWatched ? ' active' : ''}"
+                data-title="${titleEnc}" data-lang="${langEnc}" data-year="${yearEnc}"
+                data-wl-id="${isWatched ? esc(wlItem.id) : ''}"
+                onclick="toggleWatch(event,this)"
+                title="${isWatched ? 'Remove from watchlist' : 'Watch for this movie daily'}">
+          ${isWatched ? '★' : '☆'}
+        </button>
       </div>`;
     }).join('');
     _calLoaded = true;
   } catch (_) {
     el.innerHTML = '<div class="sw-loading">Could not load calendar.</div>';
+  }
+}
+
+async function toggleWatch(e, btn) {
+  e.stopPropagation();
+  const title    = decodeURIComponent(btn.dataset.title);
+  const language = decodeURIComponent(btn.dataset.lang);
+  const year     = decodeURIComponent(btn.dataset.year) || null;
+  const wlId     = btn.dataset.wlId;
+  const isActive = btn.classList.contains('active');
+  btn.disabled   = true;
+  try {
+    if (isActive && wlId) {
+      await fetch(`/api/watchlist/${encodeURIComponent(wlId)}`, { method: 'DELETE' });
+      btn.classList.remove('active');
+      btn.textContent  = '☆';
+      btn.dataset.wlId = '';
+      btn.title        = 'Watch for this movie daily';
+      delete _watchlistMap[_normWl(title)];
+      toast(`Removed "${title}" from watchlist`, 'success');
+    } else {
+      const res  = await fetch('/api/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, language, year }),
+      });
+      const d = await res.json();
+      if (d.id) {
+        btn.classList.add('active');
+        btn.textContent  = '★';
+        btn.dataset.wlId = d.id;
+        btn.title        = 'Remove from watchlist';
+        _watchlistMap[_normWl(title)] = { id: d.id, title };
+        toast(`"${title}" added — Eden will search daily`, 'success');
+      } else {
+        throw new Error(d.error || 'Failed');
+      }
+    }
+  } catch (err) {
+    toast('Watchlist error: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
   }
 }
 

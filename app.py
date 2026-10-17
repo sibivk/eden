@@ -101,7 +101,7 @@ def apply_headers(response):
     # CORS — allow external webapps to call Eden's API
     if request.path.startswith("/api/"):
         response.headers["Access-Control-Allow-Origin"]  = EDEN_CORS_ORIGINS
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Eden-API-Key"
         response.headers["Access-Control-Max-Age"]       = "86400"
     return response
@@ -296,6 +296,48 @@ def scheduler_trigger():
         msg = trigger_now()
         logger.info("Manual scheduler trigger by user")
         return jsonify({"status": "ok", "message": msg})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/watchlist", methods=["GET"])
+def api_get_watchlist():
+    try:
+        from scheduler import get_watchlist
+        return jsonify({"watchlist": get_watchlist()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/watchlist", methods=["POST"])
+def api_add_watchlist():
+    data = request.get_json(silent=True) or {}
+    title = data.get("title", "").strip()[:200]
+    language = data.get("language", "").strip().lower()
+    year = data.get("year")
+    if not title:
+        return jsonify({"error": "Missing title"}), 400
+    if language and language not in VALID_LANGUAGES:
+        return jsonify({"error": f"Invalid language '{language}'"}), 400
+    try:
+        from scheduler import add_to_watchlist
+        item_id = add_to_watchlist(title, language, str(year) if year else None)
+        return jsonify({"status": "ok", "id": item_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+_WL_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+@app.route("/api/watchlist/<item_id>", methods=["DELETE"])
+def api_remove_watchlist(item_id):
+    if not _WL_ID_RE.match(item_id):
+        return jsonify({"error": "Invalid id"}), 400
+    try:
+        from scheduler import remove_from_watchlist
+        removed = remove_from_watchlist(item_id)
+        return jsonify({"status": "ok" if removed else "not_found"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -28,6 +28,7 @@ STORAGE_MOUNT = Path('/media')
 READY_LOG     = STORAGE_MOUNT / '.eden_ready.log'
 DATA_DIR      = Path('/app/data')
 MOVIES_DB     = DATA_DIR / 'movies.json'
+WATCHLIST_DB  = DATA_DIR / 'watchlist.json'
 LOG_POSITION  = DATA_DIR / 'log_position.txt'
 
 LIBRARY_PATHS = {
@@ -299,6 +300,57 @@ def get_stats() -> dict:
             'total_queued': len(dl),
             'total_moved': sum(1 for v in dl.values() if v.get('status') == 'moved'),
         }
+
+
+# ── Watchlist ─────────────────────────────────────────────────────────────────
+
+def _load_watchlist() -> list:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if WATCHLIST_DB.exists():
+        try:
+            return json.loads(WATCHLIST_DB.read_text())
+        except Exception:
+            pass
+    return []
+
+
+def _save_watchlist(items: list):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    WATCHLIST_DB.write_text(json.dumps(items, indent=2, default=str))
+
+
+def get_watchlist() -> list:
+    with _db_lock:
+        return _load_watchlist()
+
+
+def add_to_watchlist(title: str, language: str, year=None) -> str:
+    import uuid as _uuid
+    with _db_lock:
+        items = _load_watchlist()
+        for item in items:
+            if _norm(item['title']) == _norm(title):
+                return item['id']
+        new_id = str(_uuid.uuid4())
+        items.append({
+            'id': new_id,
+            'title': title,
+            'language': language.lower() if language else '',
+            'year': str(year) if year else None,
+            'added_at': datetime.utcnow().isoformat(),
+        })
+        _save_watchlist(items)
+        return new_id
+
+
+def remove_from_watchlist(item_id: str) -> bool:
+    with _db_lock:
+        items = _load_watchlist()
+        new_items = [i for i in items if i['id'] != item_id]
+        if len(new_items) == len(items):
+            return False
+        _save_watchlist(new_items)
+        return True
 
 
 # ── Library existence check ───────────────────────────────────────────────────
@@ -834,6 +886,52 @@ def auto_download_job():
             queued += 1
         else:
             logger.error('✗ Failed to queue "%s" to NZBGet', title)
+
+    # ── Process watchlist ──────────────────────────────────────────────────────
+    with _db_lock:
+        watchlist = _load_watchlist()
+
+    for wl_item in watchlist:
+        title = wl_item.get('title', '')
+        lang  = wl_item.get('language', '')
+        year  = wl_item.get('year')
+        if not title:
+            continue
+
+        time.sleep(2)
+
+        if _is_tracked(title, year):
+            logger.debug('Watchlist: already tracked: %s', title)
+            continue
+
+        if _in_library(title):
+            logger.info('Watchlist: already in library: %s', title)
+            continue
+
+        results = search_1080p(title, year)
+        if not results:
+            logger.info('Watchlist: no NZB found for: %s', title)
+            with _db_lock:
+                db = _load_db()
+                _log_activity(db, 'no_nzb', title=title, year=year, language=lang)
+                _save_db(db)
+            continue
+
+        best = results[0]
+        _, nzb_year = _extract_name_year(best['title'])
+        use_year = nzb_year or year
+        safe_title = re.sub(r'[^\w\s]', '', title).strip().replace(' ', '.')
+        clean_name = f'{safe_title}.{use_year}' if use_year else safe_title
+
+        nzbget_id = queue_to_nzbget(best['url'], clean_name)
+        if nzbget_id:
+            _record_queued(title, use_year, lang, best['title'], nzbget_id)
+            _send_push(title, lang, use_year)
+            logger.info('✓ Watchlist queued "%s" [%s]', title, lang)
+            queued += 1
+        else:
+            logger.error('✗ Watchlist: failed to queue "%s" to NZBGet', title)
+    # ── End watchlist ──────────────────────────────────────────────────────────
 
     logger.info('=== Auto-download done: %d queued | %d skipped | %d no NZB ===',
                 queued, skipped_exists, skipped_no_nzb)
