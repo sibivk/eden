@@ -883,6 +883,16 @@ def auto_download_job():
 
         # Clean name for NZBGet filename: Title.Year
         _, nzb_year = _extract_name_year(nzb_title)
+        # Second-pass age check: NZB title almost always contains the year even when
+        # the scraper didn't — catch old movies that slipped past the earlier filter.
+        if nzb_year:
+            try:
+                if int(nzb_year) < _current_year - 1:
+                    logger.info('Skipping old NZB year (%s) for "%s": %s', nzb_year, title, nzb_title)
+                    skipped_exists += 1
+                    continue
+            except (ValueError, TypeError):
+                pass
         use_year = nzb_year or year
         safe_title = re.sub(r'[^\w\s]', '', title).strip().replace(' ', '.')
         clean_name = f'{safe_title}.{use_year}' if use_year else safe_title
@@ -937,6 +947,13 @@ def auto_download_job():
 
         best = results[0]
         _, nzb_year = _extract_name_year(best['title'])
+        if nzb_year:
+            try:
+                if int(nzb_year) < _current_year - 1:
+                    logger.info('Watchlist: skipping old NZB year (%s) for "%s"', nzb_year, title)
+                    continue
+            except (ValueError, TypeError):
+                pass
         use_year = nzb_year or year
         safe_title = re.sub(r'[^\w\s]', '', title).strip().replace(' ', '.')
         clean_name = f'{safe_title}.{use_year}' if use_year else safe_title
