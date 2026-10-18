@@ -808,6 +808,16 @@ def auto_download_job():
 
     _current_year = datetime.utcnow().year
 
+    def _nzb_year_ok(r):
+        """Return False if the NZB title contains a year that is too old."""
+        _, ry = _extract_name_year(r['title'])
+        if ry:
+            try:
+                return int(ry) >= _current_year - 1
+            except (ValueError, TypeError):
+                pass
+        return True
+
     for idx, movie in enumerate(movies):
         title = movie['title']
         lang  = movie['language']
@@ -876,23 +886,22 @@ def auto_download_job():
                 skipped_exists += 1
                 continue
 
+        results = [r for r in results if _nzb_year_ok(r)]
+        if not results:
+            logger.info('No recent-year NZB found for: %s (all results were old releases)', title)
+            skipped_no_nzb += 1
+            with _db_lock:
+                db = _load_db()
+                _log_activity(db, 'no_nzb', title=title, year=year, language=lang)
+                _save_db(db)
+            continue
+
         best = results[0]  # smallest above 1 GB
         nzb_title = best['title']
         nzb_url   = best['url']
         size_gb   = best['size_bytes'] / 1024 ** 3
 
-        # Clean name for NZBGet filename: Title.Year
         _, nzb_year = _extract_name_year(nzb_title)
-        # Second-pass age check: NZB title almost always contains the year even when
-        # the scraper didn't — catch old movies that slipped past the earlier filter.
-        if nzb_year:
-            try:
-                if int(nzb_year) < _current_year - 1:
-                    logger.info('Skipping old NZB year (%s) for "%s": %s', nzb_year, title, nzb_title)
-                    skipped_exists += 1
-                    continue
-            except (ValueError, TypeError):
-                pass
         use_year = nzb_year or year
         safe_title = re.sub(r'[^\w\s]', '', title).strip().replace(' ', '.')
         clean_name = f'{safe_title}.{use_year}' if use_year else safe_title
@@ -945,15 +954,17 @@ def auto_download_job():
                 _save_db(db)
             continue
 
+        results = [r for r in results if _nzb_year_ok(r)]
+        if not results:
+            logger.info('Watchlist: no recent-year NZB for: %s (all results were old)', title)
+            with _db_lock:
+                db = _load_db()
+                _log_activity(db, 'no_nzb', title=title, year=year, language=lang)
+                _save_db(db)
+            continue
+
         best = results[0]
         _, nzb_year = _extract_name_year(best['title'])
-        if nzb_year:
-            try:
-                if int(nzb_year) < _current_year - 1:
-                    logger.info('Watchlist: skipping old NZB year (%s) for "%s"', nzb_year, title)
-                    continue
-            except (ValueError, TypeError):
-                pass
         use_year = nzb_year or year
         safe_title = re.sub(r'[^\w\s]', '', title).strip().replace(' ', '.')
         clean_name = f'{safe_title}.{use_year}' if use_year else safe_title
