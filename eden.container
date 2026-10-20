@@ -1,0 +1,42 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=Eden — OTT Movie Downloader & Auto-Queue
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/eden:latest
+ContainerName=eden
+AutoUpdate=local
+
+PublishPort=5000:5000
+
+EnvironmentFile=%h/eden/.env
+
+# App data (persistent across restarts)
+Volume=%h/eden/logs:/app/logs:Z
+Volume=%h/eden/data:/app/data:Z
+
+# Source files — mounted live so podman restart picks up latest code without a rebuild
+Volume=%h/eden/app.py:/app/app.py:Z
+Volume=%h/eden/scheduler.py:/app/scheduler.py:Z
+Volume=%h/eden/templates:/app/templates:Z
+Volume=%h/eden/static:/app/static:Z
+
+# NAS — Evaluate (STORAGE_PATH) and language libraries
+Volume=/mnt/nas/VAULT/Evaluate:/media:Z
+Volume=/mnt/nas/VAULT/SEIVOM/Malayalam:/libraries/malayalam:Z
+Volume=/mnt/nas/VAULT/SEIVOM/Hindi:/libraries/hindi:Z
+Volume=/mnt/nas/VAULT/SEIVOM/Tamil:/libraries/tamil:Z
+Volume=/mnt/nas/VAULT/SEIVOM/English:/libraries/english:Z
+
+# Hairpin-NAT fix: nzbget domain resolves to host LAN IP, redirect via container gateway
+AddHost=nzbget.sibikaitharath.com:169.254.1.2
+
+[Service]
+TimeoutStartSec=900
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
