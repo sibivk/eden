@@ -49,7 +49,7 @@ EDEN_CORS_ORIGINS = os.getenv("EDEN_CORS_ORIGINS", "*")  # e.g. "https://myapp.e
 NEWZNAB_NS = "{http://www.newznab.com/DTD/2010/feeds/attributes/}"
 
 _SAFE_TITLE_RE = re.compile(r"[^\w\s\-\(\)\.]")
-_YEAR_RE = re.compile(r"^(.*?)[. _]\(?(\d{4})\)?")
+_YEAR_RE = re.compile(r"^(.*?)[. _\[(-]\(?((?:19|20)\d{2})\)?")
 
 _HEVC_RE = re.compile(r'(?i)\b(HEVC|x265|h\.?265)\b')
 _5_1_RE  = re.compile(r'(?i)\b(DD[P]?[.\s]?5\.1|DTS(?:[-.\s](?:HD|MA|HD[-.]MA))?|AC3|5\.1|Atmos|TrueHD)\b')
