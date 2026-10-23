@@ -61,6 +61,9 @@ PROTECTED_DIRS = {'preroll', 'temp'}   # compared case-insensitively
 # Movies identified as these are rejected even if the source site
 # lists them under malayalam/hindi/tamil (e.g. dubbed releases).
 _NON_TARGET_LANG_CODES = {'te', 'kn', 'bn', 'mr', 'gu', 'pa', 'ur', 'or', 'as'}
+# Maps TMDB original_language codes to Eden library names for the three target languages.
+# Used to correct scraper misclassifications before routing files to libraries.
+_TMDB_LANG_MAP = {'hi': 'hindi', 'ml': 'malayalam', 'ta': 'tamil'}
 # te=Telugu, kn=Kannada, bn=Bengali, mr=Marathi, gu=Gujarati
 # pa=Punjabi, ur=Urdu, or=Odia, as=Assamese
 OTT_URL        = 'https://www.ottmovierelease.com'
@@ -886,6 +889,14 @@ def auto_download_job():
                 skipped_exists += 1
                 continue
 
+        # Correct scraper language with TMDB's confirmed language so the file
+        # lands in the right library even when the OTT calendar is wrong.
+        if tmdb_lang and tmdb_lang in _TMDB_LANG_MAP:
+            confirmed = _TMDB_LANG_MAP[tmdb_lang]
+            if confirmed != lang:
+                logger.info('TMDB corrected language for "%s": %s → %s', title, lang, confirmed)
+                lang = confirmed
+
         results = [r for r in results if _nzb_year_ok(r)]
         if not results:
             logger.info('No recent-year NZB found for: %s (all results were old releases)', title)
@@ -1046,6 +1057,12 @@ def process_completed_files():
 
         if not src.exists():
             logger.warning('Completed file not found in container: %s', src)
+            continue
+
+        # Only process video files — skip artwork, subtitles, nfo, etc.
+        _VIDEO_EXTS = {'.mkv', '.mp4', '.avi', '.mov', '.m4v', '.ts', '.wmv'}
+        if src.is_file() and src.suffix.lower() not in _VIDEO_EXTS:
+            logger.debug('Skipping non-video file: %s', src.name)
             continue
 
         # Extract title + year — try filename stem first, then parent folder name as fallback.
