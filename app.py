@@ -206,6 +206,18 @@ def search_nzb():
         except Exception as e:
             logger.warning("Radarr UI search failed: %s", e)
 
+    # Filter out NZBs whose embedded year is too old — keeps search consistent with queue guard
+    _cy = __import__('datetime').datetime.utcnow().year
+    def _year_ok(title):
+        m = _YEAR_RE.search(title)
+        if m:
+            try:
+                return int(m.group(2)) >= _cy - 1
+            except (ValueError, TypeError):
+                pass
+        return True
+    results = [r for r in results if _year_ok(r["title"])]
+
     def _sort_key(r):
         res = r["quality"]["resolution"]
         prio = {"1080p": 0, "4K": 1}.get(res, 3)
