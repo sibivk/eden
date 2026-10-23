@@ -233,6 +233,18 @@ def queue_nzb():
         return jsonify({"error": "Invalid URL"}), 400
     if language and language not in VALID_LANGUAGES:
         return jsonify({"error": f"Invalid language '{language}' — must be malayalam, hindi or tamil"}), 400
+    # Reject NZBs whose title contains a year older than current_year - 1
+    _current_year = __import__('datetime').datetime.utcnow().year
+    _year_in_title = _YEAR_RE.search(title)
+    if _year_in_title:
+        try:
+            nzb_year = int(_year_in_title.group(2))
+            if nzb_year < _current_year - 1:
+                logger.warning("Queue rejected — NZB year %d too old: %s", nzb_year, title[:80])
+                return jsonify({"error": f"NZB year {nzb_year} is too old — Eden is for recent releases only"}), 400
+        except (ValueError, IndexError):
+            pass
+
     # Lock category to the configured value — ignore whatever the caller sends
     category = NZB_CATEGORY
 
