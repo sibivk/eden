@@ -30,8 +30,10 @@ Volume=/mnt/nas/VAULT/SEIVOM/Hindi:/libraries/hindi:Z
 Volume=/mnt/nas/VAULT/SEIVOM/Tamil:/libraries/tamil:Z
 Volume=/mnt/nas/VAULT/SEIVOM/English:/libraries/english:Z
 
-# Hairpin-NAT fix: nzbget domain resolves to host LAN IP, redirect via container gateway
+# Hairpin-NAT fix: LAN hostnames resolve to LAN IPs that the container can't reach directly;
+# redirect both via the container gateway so pasta routes them back to the LAN.
 AddHost=nzbget.sibikaitharath.com:169.254.1.2
+AddHost=radarr.sibikaitharath.com:169.254.1.2
 
 [Service]
 TimeoutStartSec=900
