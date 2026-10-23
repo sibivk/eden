@@ -482,7 +482,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .stat-chip.size-green  { background: rgba(16,185,129,0.1);  border-color: rgba(16,185,129,0.25); color: #34d399; }
 .stat-chip.size-yellow { background: rgba(245,158,11,0.1);  border-color: rgba(245,158,11,0.25); color: #fbbf24; }
 .stat-chip.size-orange { background: rgba(239,68,68,0.1);   border-color: rgba(239,68,68,0.25);  color: #f87171; }
-.stat-chip.imdb-chip   { background: rgba(245,197,24,0.1);  border-color: rgba(245,197,24,0.25); color: #fde68a; }
+.stat-chip.imdb-chip    { background: rgba(245,197,24,0.1);  border-color: rgba(245,197,24,0.25); color: #fde68a; }
+.stat-chip.source-chip  { background: rgba(148,163,184,0.08); border-color: rgba(148,163,184,0.18); color: #94a3b8; }
 
 .size-bar-wrap { flex: 1; height: 2px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; min-width: 50px; }
 .size-bar { height: 100%; border-radius: 2px; transition: width 0.6s ease; }
@@ -1641,6 +1642,7 @@ function renderResults(items) {
         <div class="stats-row">
           <span class="stat-chip size-${sc}"><span class="chip-label">Size</span>${fmtSize(item.size_bytes)}</span>
           ${imdbChip}
+          ${item.source ? `<span class="stat-chip source-chip"><span class="chip-label">Via</span>${esc(item.source)}</span>` : ''}
           <div class="size-bar-wrap"><div class="size-bar ${sc}" style="width:${pct}%"></div></div>
         </div>
       </div>

@@ -157,6 +157,7 @@ def _search_one_indexer(query, base_url, api_key, label):
             "size_bytes": size, "grabs": grabs,
             "imdb_rating": imdb_rating, "imdb_votes": imdb_votes,
             "quality": _parse_quality(title),
+            "source": label,
         })
     logger.info("UI search [%s] '%s' → %d results", label, query, len(items))
     return items
@@ -185,8 +186,8 @@ def search_nzb():
                 seen_titles.add(r["title"])
                 results.append(r)
 
-    # Radarr fallback — covers nzbs.in; only called when direct indexers find nothing
-    if not results and RADARR_URL and RADARR_API_KEY:
+    # Radarr — always run; covers nzbs.in without direct contact
+    if RADARR_URL and RADARR_API_KEY:
         try:
             from scheduler import _radarr_search
             for r in _radarr_search(query):
@@ -200,9 +201,10 @@ def search_nzb():
                         "imdb_rating":  None,
                         "imdb_votes":   0,
                         "quality":      r["quality"],
+                        "source":       "nzbs.in (Radarr)",
                     })
         except Exception as e:
-            logger.warning("Radarr UI fallback failed: %s", e)
+            logger.warning("Radarr UI search failed: %s", e)
 
     def _sort_key(r):
         res = r["quality"]["resolution"]
