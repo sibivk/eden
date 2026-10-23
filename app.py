@@ -190,7 +190,7 @@ def search_nzb():
     if RADARR_URL and RADARR_API_KEY:
         try:
             from scheduler import _radarr_search
-            for r in _radarr_search(query):
+            for r in _radarr_search(query, apply_size_filter=False):
                 if r["title"] not in seen_titles:
                     seen_titles.add(r["title"])
                     results.append({

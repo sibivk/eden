@@ -562,7 +562,7 @@ def _query_indexer(title: str, base_url: str, api_key: str, label: str) -> list:
     return {'1080': r1080, 'hevc51': rhevc, '4k': r4k}
 
 
-def _radarr_search(title: str, year=None) -> list:
+def _radarr_search(title: str, year=None, apply_size_filter: bool = True) -> list:
     """
     Search for NZB releases via Radarr's interactive search API.
     Radarr queries all its configured indexers (e.g. nzbs.in) — no direct AI contact.
@@ -673,7 +673,7 @@ def _radarr_search(title: str, year=None) -> list:
                 continue
             if not _nzb_title_matches(title, nzb_title):
                 continue
-            if size < MIN_SIZE_BYTES or size > MAX_SIZE_BYTES:
+            if apply_size_filter and (size < MIN_SIZE_BYTES or size > MAX_SIZE_BYTES):
                 continue
             results.append({'title': nzb_title, 'url': dl_url,
                             'size_bytes': size, 'quality': _parse_quality(nzb_title)})
