@@ -66,6 +66,11 @@ _NON_TARGET_LANG_CODES = {'te', 'kn', 'bn', 'mr', 'gu', 'pa', 'ur', 'or', 'as'}
 _TMDB_LANG_MAP = {'hi': 'hindi', 'ml': 'malayalam', 'ta': 'tamil'}
 # te=Telugu, kn=Kannada, bn=Bengali, mr=Marathi, gu=Gujarati
 # pa=Punjabi, ur=Urdu, or=Odia, as=Assamese
+# Titles permanently blocked — confirmed series or otherwise never to be downloaded.
+# Add normalized lowercase title; checked before any NZB search or API call.
+_BLOCKED_TITLES = {
+    'landoffootball',   # Malayalam web series, not a movie
+}
 OTT_URL        = 'https://www.ottmovierelease.com'
 EINTHUSAN_URL  = 'https://einthusan.tv/movie/results/?find=Recent&lang={lang}&page=1'
 
@@ -836,6 +841,11 @@ def auto_download_job():
             except (ValueError, TypeError):
                 pass
 
+        if _norm(title) in _BLOCKED_TITLES:
+            logger.debug('Blocked title, skipping permanently: %s', title)
+            skipped_exists += 1
+            continue
+
         if idx > 0:
             time.sleep(2)  # 2s between movies keeps total rate well under indexer limits
 
@@ -945,6 +955,10 @@ def auto_download_job():
                     continue
             except (ValueError, TypeError):
                 pass
+
+        if _norm(title) in _BLOCKED_TITLES:
+            logger.debug('Blocked title, skipping permanently: %s', title)
+            continue
 
         time.sleep(2)
 
