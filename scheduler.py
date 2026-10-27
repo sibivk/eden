@@ -1284,6 +1284,8 @@ def get_library() -> dict:
     for entry in db.get('downloads', {}).values():
         if entry.get('status') != 'moved':
             continue
+        if entry.get('alias'):
+            continue
         lang = entry.get('language', '')
         if not lang:
             continue
