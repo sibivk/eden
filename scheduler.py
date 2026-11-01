@@ -884,9 +884,11 @@ def auto_download_job():
             continue
 
         if tmdb_lang and tmdb_lang in _NON_TARGET_LANG_CODES:
-            nzb_titles_str = ' '.join(r.get('title', '') for r in results)
-            if _DUB_HINT_RE.search(nzb_titles_str):
-                logger.info('"%s" is TMDB:%s but NZB hints dub — downloading', title, tmdb_lang)
+            dubbed = [r for r in results if _DUB_HINT_RE.search(r.get('title', ''))]
+            if dubbed:
+                results = dubbed  # restrict to dubbed NZBs only so best result is the dub
+                logger.info('"%s" is TMDB:%s but %d dubbed NZB(s) found — using dubbed only',
+                            title, tmdb_lang, len(dubbed))
             else:
                 detail = (f'TMDB original language is {tmdb_lang} '
                           f'(source listed as {lang}) — no dub hint in NZBs')
