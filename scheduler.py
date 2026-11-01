@@ -408,7 +408,18 @@ def _tmdb_get_info(title: str, year) -> tuple:
             return '', False
         movies = [x for x in media if x.get('media_type') == 'movie']
         if movies:
-            return movies[0].get('original_language', ''), False
+            top = movies[0]
+            # Discard TMDB result if its release year is more than 2 years off —
+            # a bad match (e.g. returning a 2013 English film for a 2026 Telugu title)
+            # is worse than no match.
+            if year:
+                try:
+                    tmdb_yr = int((top.get('release_date') or '')[:4])
+                    if abs(tmdb_yr - int(year)) > 2:
+                        return '', False
+                except (ValueError, TypeError):
+                    pass
+            return top.get('original_language', ''), False
         # Only TV results found — this title is a series, not a movie
         return '', True
     except Exception as e:
