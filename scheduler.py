@@ -965,46 +965,43 @@ def auto_download_job():
             try:
                 if int(year) < _current_year - 1:
                     logger.debug('Watchlist: skipping old movie (%s): %s', year, title)
+                    skipped_exists += 1
                     continue
             except (ValueError, TypeError):
                 pass
 
         if _norm(title) in _BLOCKED_TITLES:
             logger.debug('Blocked title, skipping permanently: %s', title)
+            skipped_exists += 1
             continue
 
         time.sleep(2)
 
         if _is_tracked(title, year):
             logger.debug('Watchlist: already tracked: %s', title)
+            skipped_exists += 1
             continue
 
         if _in_library(title):
             logger.info('Watchlist: already in library: %s', title)
+            skipped_exists += 1
             continue
 
         results = search_1080p(title, year)
         if not results:
             logger.info('Watchlist: no NZB found for: %s', title)
+            skipped_no_nzb += 1
             with _db_lock:
                 db = _load_db()
                 _log_activity(db, 'no_nzb', title=title, year=year, language=lang)
                 _save_db(db)
             continue
 
-        results = [r for r in results if _nzb_year_ok(r)]
-        if not results:
-            logger.info('Watchlist: no recent-year NZB for: %s (all results were old)', title)
-            with _db_lock:
-                db = _load_db()
-                _log_activity(db, 'no_nzb', title=title, year=year, language=lang)
-                _save_db(db)
-            continue
-
-        # TMDB language verification — same logic as OTT loop
+        # TMDB language verification — same logic and order as OTT loop
         tmdb_lang, is_tv = _tmdb_get_info(title, year)
         if is_tv:
             logger.info('Watchlist: skipping "%s" — TMDB identifies as TV series', title)
+            skipped_exists += 1
             with _db_lock:
                 db = _load_db()
                 _log_activity(db, 'tv_skip', title=title, year=year, language=lang,
@@ -1020,6 +1017,7 @@ def auto_download_job():
                             title, tmdb_lang, len(dubbed))
             else:
                 logger.info('Watchlist: skipping "%s" — TMDB:%s, no dub hint in NZBs', title, tmdb_lang)
+                skipped_exists += 1
                 with _db_lock:
                     db = _load_db()
                     _log_activity(db, 'lang_skip', title=title, year=year,
@@ -1034,17 +1032,31 @@ def auto_download_job():
                 logger.info('Watchlist: TMDB corrected language for "%s": %s → %s', title, lang, confirmed)
                 lang = confirmed
 
+        results = [r for r in results if _nzb_year_ok(r)]
+        if not results:
+            logger.info('Watchlist: no recent-year NZB for: %s (all results were old)', title)
+            skipped_no_nzb += 1
+            with _db_lock:
+                db = _load_db()
+                _log_activity(db, 'no_nzb', title=title, year=year, language=lang)
+                _save_db(db)
+            continue
+
         best = results[0]
-        _, nzb_year = _extract_name_year(best['title'])
+        nzb_title = best['title']
+        size_gb   = best['size_bytes'] / 1024 ** 3
+        _, nzb_year = _extract_name_year(nzb_title)
         use_year = nzb_year or year
         safe_title = re.sub(r'[^\w\s]', '', title).strip().replace(' ', '.')
         clean_name = f'{safe_title}.{use_year}' if use_year else safe_title
 
         nzbget_id = queue_to_nzbget(best['url'], clean_name)
         if nzbget_id:
-            _record_queued(title, use_year, lang, best['title'], nzbget_id)
+            res = '4K' if ('2160p' in nzb_title or '4K' in nzb_title or 'UHD' in nzb_title) else '1080p'
+            logger.info('✓ Watchlist queued "%s" [%s/%s] %.2fGB → NZBGet #%d',
+                        title, lang, res, size_gb, nzbget_id)
+            _record_queued(title, use_year, lang, nzb_title, nzbget_id)
             _send_push(title, lang, use_year)
-            logger.info('✓ Watchlist queued "%s" [%s]', title, lang)
             queued += 1
         else:
             logger.error('✗ Watchlist: failed to queue "%s" to NZBGet', title)
