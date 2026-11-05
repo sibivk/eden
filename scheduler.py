@@ -1001,6 +1001,39 @@ def auto_download_job():
                 _save_db(db)
             continue
 
+        # TMDB language verification — same logic as OTT loop
+        tmdb_lang, is_tv = _tmdb_get_info(title, year)
+        if is_tv:
+            logger.info('Watchlist: skipping "%s" — TMDB identifies as TV series', title)
+            with _db_lock:
+                db = _load_db()
+                _log_activity(db, 'tv_skip', title=title, year=year, language=lang,
+                              detail='TMDB identifies this as a TV series, not a movie')
+                _save_db(db)
+            continue
+
+        if tmdb_lang and tmdb_lang in _NON_TARGET_LANG_CODES:
+            dubbed = [r for r in results if _DUB_HINT_RE.search(r.get('title', ''))]
+            if dubbed:
+                results = dubbed
+                logger.info('Watchlist: "%s" is TMDB:%s but %d dubbed NZB(s) found — using dubbed only',
+                            title, tmdb_lang, len(dubbed))
+            else:
+                logger.info('Watchlist: skipping "%s" — TMDB:%s, no dub hint in NZBs', title, tmdb_lang)
+                with _db_lock:
+                    db = _load_db()
+                    _log_activity(db, 'lang_skip', title=title, year=year,
+                                  language=lang, tmdb_lang=tmdb_lang,
+                                  detail=f'TMDB original language is {tmdb_lang} — no dub hint in NZBs')
+                    _save_db(db)
+                continue
+
+        if tmdb_lang and tmdb_lang in _TMDB_LANG_MAP:
+            confirmed = _TMDB_LANG_MAP[tmdb_lang]
+            if confirmed != lang:
+                logger.info('Watchlist: TMDB corrected language for "%s": %s → %s', title, lang, confirmed)
+                lang = confirmed
+
         best = results[0]
         _, nzb_year = _extract_name_year(best['title'])
         use_year = nzb_year or year
