@@ -1074,6 +1074,62 @@ def auto_download_job():
 
 # ── File mover ────────────────────────────────────────────────────────────────
 
+# ISO 639 language codes accepted for each library language.
+_LANG_AUDIO_CODES = {
+    'malayalam': {'ml', 'mal'},
+    'hindi':     {'hi', 'hin'},
+    'tamil':     {'ta', 'tam'},
+    'english':   {'en', 'eng'},
+}
+
+def _mkv_language_ok(src: 'Path', expected_lang: str) -> bool:
+    """
+    Inspect audio tracks in the MKV file.
+    Returns True (allow move) if:
+      - pymediainfo is unavailable (can't check — allow)
+      - No audio tracks found (can't determine — allow)
+      - Any audio track is untagged/und (can't determine — allow)
+      - Multiple audio tracks exist (multi-language release — allow)
+      - At least one audio track matches expected_lang
+    Returns False only when all tracks are tagged AND none matches.
+    """
+    try:
+        from pymediainfo import MediaInfo
+    except ImportError:
+        logger.debug('pymediainfo not available — skipping audio language check')
+        return True
+    try:
+        info = MediaInfo.parse(str(src))
+    except Exception as e:
+        logger.warning('MediaInfo parse failed for %s: %s', src.name, e)
+        return True
+
+    audio_tracks = [t for t in info.tracks if t.track_type == 'Audio']
+    if not audio_tracks:
+        return True
+
+    if len(audio_tracks) > 1:
+        return True  # multi-audio release, always accept
+
+    accepted = _LANG_AUDIO_CODES.get(expected_lang, set())
+    langs = [
+        (t.language or '').strip().lower()
+        for t in audio_tracks
+    ]
+    # If any track is untagged, we can't determine — allow
+    if any(lg in ('', 'und', 'undefined') for lg in langs):
+        return True
+
+    if any(lg in accepted for lg in langs):
+        return True
+
+    logger.warning(
+        'Language mismatch: %s has audio=%s, expected %s — skipping move',
+        src.name, langs, expected_lang,
+    )
+    return False
+
+
 def _get_log_pos() -> int:
     if LOG_POSITION.exists():
         try:
@@ -1227,6 +1283,16 @@ def process_completed_files():
                 except Exception as rm_err:
                     logger.warning('Could not remove duplicate folder %s: %s', src_folder, rm_err)
             continue
+
+        # Inspect audio tracks for .mkv files before moving
+        if src.is_file() and src.suffix.lower() == '.mkv':
+            if not _mkv_language_ok(src, lang):
+                logger.warning(
+                    'LANGUAGE MISMATCH — will not move "%s" to %s library. '
+                    'File stays in Evaluate for manual review.',
+                    src.name, lang,
+                )
+                continue
 
         try:
             shutil.move(str(src), str(dest))
