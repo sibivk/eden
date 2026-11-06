@@ -742,6 +742,7 @@ def search_1080p(title: str, year=None) -> list:
         logger.info('Search "%s" [%s] → %d results', title, label, total)
 
     # Radarr search (covers nzbs.in + any other indexers configured in Radarr)
+    # Radarr results are TMDB-linked and therefore more trustworthy for language matching.
     if RADARR_URL and RADARR_API_KEY:
         radarr_hits = _radarr_search(title, year)
         seen = {e['title'] for e in merged['1080'] + merged['hevc51'] + merged['4k']}
@@ -752,6 +753,7 @@ def search_1080p(title: str, year=None) -> list:
                           else '4k' if q['resolution'] == '4K'
                           else 'hevc51' if (q['is_hevc'] and q['has_5_1']) else None)
                 if bucket:
+                    r['from_radarr'] = True
                     merged[bucket].append(r)
                 seen.add(r['title'])
 
@@ -763,7 +765,8 @@ def search_1080p(title: str, year=None) -> list:
     else:
         results = merged['4k']
 
-    results.sort(key=lambda x: x['size_bytes'])
+    # Radarr results first (TMDB-linked, correct movie), then by size ascending.
+    results.sort(key=lambda x: (0 if x.get('from_radarr') else 1, x['size_bytes']))
     return results
 
 
