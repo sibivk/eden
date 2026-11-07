@@ -249,6 +249,9 @@ def _is_tracked(title: str, year) -> bool:
             return False
         if entry.get('status') == 'moved':
             return True
+        # The file's audio was the wrong language: look again, never with the same NZB
+        if entry.get('status') == 'wrong_language':
+            return False
         # Queued >7 days ago means the download likely failed/was wrong — allow retry
         if entry.get('status') == 'queued':
             queued_at = entry.get('queued_at', '')
@@ -284,6 +287,51 @@ def _record_moved(key: str, title: str, dest: str):
         db.setdefault('downloads', {})[key] = entry
         _log_activity(db, 'moved', title=title, detail=dest)
         _save_db(db)
+
+
+def _rejected_nzbs() -> set:
+    with _db_lock:
+        return set(_load_db().get('rejected_nzbs', []))
+
+
+def _drop_rejected(results: list, title: str) -> list:
+    """Leave out NZBs already downloaded once whose audio was the wrong language."""
+    bad = _rejected_nzbs()
+    kept = [r for r in results if r.get('title') not in bad]
+    if len(kept) < len(results):
+        logger.info('Skipping %d NZB(s) for "%s" already found to be the wrong language',
+                    len(results) - len(kept), title)
+    return kept
+
+
+def _record_held(key: str, title: str, src_name: str, langs: list, lang: str):
+    """The file's audio isn't the library's language: remember its NZB as wrong, keep the file in Evaluate."""
+    with _db_lock:
+        db = _load_db()
+        entry = db.setdefault('downloads', {}).setdefault(key, {'title': title})
+        nzb = entry.get('nzb_title')
+        if nzb and nzb not in db.setdefault('rejected_nzbs', []):
+            db['rejected_nzbs'].append(nzb)
+        entry.update({'status': 'wrong_language', 'held_file': src_name, 'audio': langs,
+                      'held_at': datetime.utcnow().isoformat()})
+        _log_activity(db, 'lang_hold', title=title, language=lang,
+                      detail=f'audio {", ".join(langs) or "not tagged"}; left in Evaluate')
+        _save_db(db)
+
+
+def _send_hold_push(title: str, lang: str, langs: list):
+    if not PUSHOVER_TOKEN or not PUSHOVER_USER:
+        return
+    heard = ', '.join(langs) if langs else 'not tagged'
+    try:
+        requests.post('https://api.pushover.net/1/messages.json',
+                      data={'token': PUSHOVER_TOKEN, 'user': PUSHOVER_USER,
+                            'title': f'EDEN-HELD-{title.upper().replace(" ", "-")}',
+                            'message': f'{title}: audio is {heard}, not {lang.title()}. '
+                                       f'Left in Evaluate; that NZB will not be downloaded again.'},
+                      timeout=8)
+    except Exception as e:
+        logger.warning('Push notification failed: %s', e)
 
 
 def _log_activity(db: dict, kind: str, **kwargs):
@@ -873,7 +921,7 @@ def auto_download_job():
             skipped_exists += 1
             continue
 
-        results = search_1080p(title, year)
+        results = _drop_rejected(search_1080p(title, year), title)
         if not results:
             logger.info('No 1080p NZB (1–10 GB) found for: %s', title)
             skipped_no_nzb += 1
@@ -990,7 +1038,7 @@ def auto_download_job():
             skipped_exists += 1
             continue
 
-        results = search_1080p(title, year)
+        results = _drop_rejected(search_1080p(title, year), title)
         if not results:
             logger.info('Watchlist: no NZB found for: %s', title)
             skipped_no_nzb += 1
@@ -1082,52 +1130,31 @@ _LANG_AUDIO_CODES = {
     'english':   {'en', 'eng'},
 }
 
-def _mkv_language_ok(src: 'Path', expected_lang: str) -> bool:
-    """
-    Inspect audio tracks in the MKV file.
-    Returns True (allow move) if:
-      - pymediainfo is unavailable (can't check — allow)
-      - No audio tracks found (can't determine — allow)
-      - Any audio track is untagged/und (can't determine — allow)
-      - Multiple audio tracks exist (multi-language release — allow)
-      - At least one audio track matches expected_lang
-    Returns False only when all tracks are tagged AND none matches.
-    """
+def _audio_languages(src: 'Path') -> list | None:
+    """The language tag of each audio track ('ml-IN' -> 'ml'; '' when untagged), or None if unreadable."""
     try:
         from pymediainfo import MediaInfo
-    except ImportError:
-        logger.debug('pymediainfo not available — skipping audio language check')
-        return True
-    try:
         info = MediaInfo.parse(str(src))
     except Exception as e:
-        logger.warning('MediaInfo parse failed for %s: %s', src.name, e)
-        return True
+        logger.warning('MediaInfo could not read %s: %s', src.name, e)
+        return None
+    return [(t.language or '').strip().lower().split('-')[0]
+            for t in info.tracks if t.track_type == 'Audio']
 
-    audio_tracks = [t for t in info.tracks if t.track_type == 'Audio']
-    if not audio_tracks:
-        return True
 
-    if len(audio_tracks) > 1:
-        return True  # multi-audio release, always accept
-
+def _language_ok(src: 'Path', expected_lang: str) -> tuple:
+    """
+    Move a file only when one of its audio tracks is the library's language
+    (a Malayalam track among English and Hindi ones is fine). Everything else
+    stays in Evaluate: all tracks another language (DISCO 2026: English +
+    Turkish, 2026-11-07), untagged tracks, or a file MediaInfo can't read.
+    Returns (ok, the audio languages found).
+    """
+    langs = _audio_languages(src)
+    if langs is None:
+        return False, []
     accepted = _LANG_AUDIO_CODES.get(expected_lang, set())
-    langs = [
-        (t.language or '').strip().lower()
-        for t in audio_tracks
-    ]
-    # If any track is untagged, we can't determine — allow
-    if any(lg in ('', 'und', 'undefined') for lg in langs):
-        return True
-
-    if any(lg in accepted for lg in langs):
-        return True
-
-    logger.warning(
-        'Language mismatch: %s has audio=%s, expected %s — skipping move',
-        src.name, langs, expected_lang,
-    )
-    return False
+    return any(lg in accepted for lg in langs), langs
 
 
 def _get_log_pos() -> int:
@@ -1284,14 +1311,17 @@ def process_completed_files():
                     logger.warning('Could not remove duplicate folder %s: %s', src_folder, rm_err)
             continue
 
-        # Inspect audio tracks for .mkv files before moving
-        if src.is_file() and src.suffix.lower() == '.mkv':
-            if not _mkv_language_ok(src, lang):
+        # Inspect the audio tracks before moving: only the library's language goes in
+        if src.is_file():
+            ok, langs = _language_ok(src, lang)
+            if not ok:
                 logger.warning(
-                    'LANGUAGE MISMATCH — will not move "%s" to %s library. '
-                    'File stays in Evaluate for manual review.',
-                    src.name, lang,
+                    'LANGUAGE MISMATCH — "%s" has audio %s, not %s: not moved, '
+                    'stays in Evaluate; its NZB will not be queued again.',
+                    src.name, langs or 'untagged', lang,
                 )
+                _record_held(key, movie_title, src.name, langs, lang)
+                _send_hold_push(movie_title, lang, langs)
                 continue
 
         try:
