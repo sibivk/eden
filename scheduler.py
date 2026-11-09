@@ -249,9 +249,9 @@ def _is_tracked(title: str, year) -> bool:
             return False
         if entry.get('status') == 'moved':
             return True
-        # The file's audio was the wrong language: look again, never with the same NZB
+        # Wrong language: stop retrying — no NZB is available in the right language yet
         if entry.get('status') == 'wrong_language':
-            return False
+            return True
         # Queued >7 days ago means the download likely failed/was wrong — allow retry
         if entry.get('status') == 'queued':
             queued_at = entry.get('queued_at', '')
